@@ -6,6 +6,7 @@
 //   swift run VibeKitHostProbe          跑全部自动断言
 import AppKit
 import Foundation
+import IOKit.hidsystem
 import VibeKitHost
 
 var failures = 0
@@ -160,6 +161,22 @@ do {
     check("Cmd+C key codes", events.map { $0.getIntegerValueField(.keyboardEventKeycode) } == [55, 8, 8, 55])
     check("modifier held for shortcut", events[1].flags.contains(.maskCommand) && events[2].flags.contains(.maskCommand))
     check("modifier released", events[3].flags.isEmpty)
+    let rightCases: [(String, Int64, UInt64)] = [
+        ("RCmd", 54, UInt64(NX_DEVICERCMDKEYMASK)),
+        ("ROpt", 61, UInt64(NX_DEVICERALTKEYMASK)),
+        ("RShift", 60, UInt64(NX_DEVICERSHIFTKEYMASK)),
+        ("RCtrl", 62, UInt64(NX_DEVICERCTLKEYMASK)),
+    ]
+    for (token, code, mask) in rightCases {
+        let replay = try DialSingleAction.events(for: [token, "A"])
+        check("right modifier replay keycode \(token)", replay[0].getIntegerValueField(.keyboardEventKeycode) == code)
+        check("right modifier replay flags \(token)", replay[1].flags.rawValue & mask == mask)
+        check("right modifier released \(token)", replay.last?.flags.isEmpty == true)
+    }
+    let both = try DialSingleAction.events(for: ["LOpt", "ROpt", "A"])
+    check("releasing right Option keeps left held", both[4].flags.contains(.maskAlternate)
+          && both[4].flags.rawValue & UInt64(NX_DEVICELALTKEYMASK) != 0
+          && both[4].flags.rawValue & UInt64(NX_DEVICERALTKEYMASK) == 0)
     check("empty single action does nothing", try DialSingleAction.events(for: []).isEmpty)
     for token in DialSingleAction.mediaCodes.keys {
         let media = try DialSingleAction.events(for: [token])

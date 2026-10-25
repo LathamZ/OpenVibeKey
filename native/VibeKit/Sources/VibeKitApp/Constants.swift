@@ -34,7 +34,47 @@ let MAIN_KEYS: [(token: String, label: String)] = {
     a += MEDIA_KEYS.map { ($0.token, $0.label) }   // 媒体键走固定功能通道，见 MEDIA_KEYS
     return a
 }()
-let MODS: [(token: String, label: String)] = [("LCmd","⌘"),("LOpt","⌥"),("LShift","⇧"),("LCtrl","⌃")]
+struct ModifierChoice: Identifiable {
+    let left: String
+    let right: String
+    let symbol: String
+    let name: String
+    var id: String { left }
+
+    func selection(in mods: Set<String>) -> String {
+        if mods.contains(left), mods.contains(right) { return "both" }
+        if mods.contains(right) { return right }
+        return mods.contains(left) ? left : ""
+    }
+
+    func label(in mods: Set<String>) -> String {
+        switch selection(in: mods) {
+        case left: return L("左") + symbol
+        case right: return L("右") + symbol
+        case "both": return L("左右") + symbol
+        default: return symbol
+        }
+    }
+
+    func apply(_ selection: String, to mods: inout Set<String>) {
+        mods.remove(left)
+        mods.remove(right)
+        if selection == left || selection == "both" { mods.insert(left) }
+        if selection == right || selection == "both" { mods.insert(right) }
+    }
+}
+
+let MODIFIER_CHOICES: [ModifierChoice] = [
+    ModifierChoice(left: "LCmd", right: "RCmd", symbol: "⌘", name: "Command"),
+    ModifierChoice(left: "LOpt", right: "ROpt", symbol: "⌥", name: "Option"),
+    ModifierChoice(left: "LShift", right: "RShift", symbol: "⇧", name: "Shift"),
+    ModifierChoice(left: "LCtrl", right: "RCtrl", symbol: "⌃", name: "Control"),
+]
+// Include both sides when constructing device writes and profile snapshots.
+// Left-only profiles retain their original token order.
+let MODS: [(token: String, label: String)] = MODIFIER_CHOICES.flatMap {
+    [($0.left, "左" + $0.symbol), ($0.right, "右" + $0.symbol)]
+}
 
 func isVibeMic(_ n: String) -> Bool { n.localizedCaseInsensitiveContains("vibe") || n.localizedCaseInsensitiveContains("au05") }
 

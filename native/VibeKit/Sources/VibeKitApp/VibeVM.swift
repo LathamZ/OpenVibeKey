@@ -27,6 +27,9 @@ struct ButtonState: Identifiable, Equatable {
     // 「打开 App：iTerm2 · 哨兵键 ⌃⌥⌘F9」，等于对着一个死绑定说它好着呢。
     var sentinelDead = false
     var tokens: [String] { MODS.map(\.token).filter { mods.contains($0) } + (mainKey.map { [$0] } ?? []) }
+    var hasValidShortcutLength: Bool {
+        mediaFuncIndex(mainKey) != nil || tokens.count <= VibeKitKeymap.maxShortcutEntries
+    }
 }
 
 // 旋钮标定探测的一行（id = 0x50 命令的 index）。
@@ -234,6 +237,26 @@ final class VibeVM: ObservableObject {
     private var dialClickTimer: Timer?
     private var dialGestureGeneration = UUID()
     private var quitting = false
+    let codexWorkflow = CodexWorkflowController()
+    @Published private(set) var navigationOwnsHardware = false
+    private var navigationJournal: NavigationCaptureJournal?
+    @Published private(set) var navigationStartupEnabled = VibeVM.migratedDefaults.bool(forKey: NavigationStartupGate.preferenceKey)
+    private var navigationStartupGate = NavigationStartupGate()
+    private var navigationStartupRecoverySeen = false
+    private var navigationStartupStateVerified = false
+    var navigationStartupAttempted: Bool { navigationStartupGate.attempted }
+    private var navigationRecoveryCorrupt = false
+    private var navigationOperation = UUID()
+    private var navigationDial = PressGesture()
+    private var navigationExit = PressGesture()
+    private var selectorExitPress = SelectorExitPress()
+    private var selectorExitGeneration: UUID?
+    private var navigationRotationHeld = Set<String>()
+    private var navigationTimer: Timer?
+    private let physicalRotaryMonitor = PhysicalRotaryMonitor()
+    private var nativePageRoute = NativePageRouteState()
+    private let navigationRecoveryKey = "codexNavigation.recovery.v1"
+    private let navigationCaptureIDs: Set<String> = Set(["dialP", "dialL", "dialR", "btn3"].map { "navigation." + $0 })
     @Published private(set) var dialPermissionPending = VibeVM.migratedDefaults.bool(forKey: "dialDoubleClick.pendingEnable")
     @Published private(set) var dialPermissionRestartRequired = false
     private var dialPermissionFlow = DialPermissionFlow()
@@ -422,6 +445,8 @@ final class VibeVM: ObservableObject {
                     self.fillState(&self.dial[k], from: restored ?? read)
                 }
                 self.slotsHydrated = true   // 首次使用：ButtonState 刚从设备读回填好，同样算加载完成
+                self.navigationStartupStateVerified = sn != "—" && !sn.isEmpty &&
+                    ["btn1", "btn2", "btn3"].allSatisfy { (reads[$0] ?? nil) != nil } && dialReads.allSatisfy { $0 != nil }
                 self.ensureActiveProfile()
                 // 这条分支不经过 applyProfile，所以哨兵得自己补写一遍。
                 // 真会走到：本地还没建过配置（首次使用）时用户就先离线绑了 App——
@@ -459,7 +484,11 @@ final class VibeVM: ObservableObject {
     // 离线→在线：读取并加载全部设备信息。
     private func goOnline() {
         connected = true; status = "已连接 VibeKey"
-        loadDeviceState()
+        if navigationJournal != nil || navigationRecoveryCorrupt {
+            restoreCodexNavigation { [weak self] ok in
+                if let self, ok, self.connected, !self.quitting { self.loadDeviceState() }
+            }
+        } else { loadDeviceState() }
     }
     /// 接收器被拔：整个 HID 会话作废，退回「未连接」。
     ///
@@ -478,6 +507,10 @@ final class VibeVM: ObservableObject {
 
     // 在线→离线：AU05 关机但连接器仍在，清掉过期信息、退回等待态。
     private func goOffline() {
+        navigationStartupStateVerified = false
+        codexWorkflow.stop()
+        cancelNativePageRouting()
+        if navigationOwnsHardware { codexWorkflow.hasRecovery = true; codexWorkflow.message = "设备已断开；下次连接会先恢复原键位。" }
         cancelDialClicks()
         dialGestureReady = false
         // 水位跟着掉：下次上线又会经历一段「connected 为真但状态没填」的窗口
@@ -525,6 +558,7 @@ final class VibeVM: ObservableObject {
 
     // MARK: 旋钮动作（复用 setShortcut/getShortcut，index = dialIdx）
     func applyDial(_ i: Int) {
+        guard !navigationOwnsHardware else { return }
         if dial[i].id == "dialP", dialDoubleClickEnabled || dialRestore != nil {
             cancelDialClicks()
             dropAppBinding("dialP")
@@ -557,6 +591,7 @@ final class VibeVM: ObservableObject {
         autosave()
     }
     func clearDial(_ i: Int) {
+        guard !navigationOwnsHardware else { return }
         if dial[i].id == "dialP", dialDoubleClickEnabled || dialRestore != nil {
             cancelDialClicks()
             dropAppBinding("dialP")
@@ -591,6 +626,7 @@ final class VibeVM: ObservableObject {
     // 旋钮标定：给 index 3…9 各写入对应「数字键」(3→"3" … 9→"9")，彼此可区分。
     // 用户在文本框里转动/按下旋钮，冒出哪个数字即知该动作对应哪个 index。不动 0/1/2(物理按键)。
     func writeDialMarkers() {
+        guard !navigationOwnsHardware else { return }
         guard !dialDoubleClickEnabled, dialRestore == nil else { return }
         guard let d = dev else { return }
         io.async {
@@ -600,6 +636,7 @@ final class VibeVM: ObservableObject {
     }
     // 调整某方向的 index 并重新读回其当前映射。
     func setDialIndex(_ i: Int, _ v: Int) {
+        guard !navigationOwnsHardware else { return }
         guard !dialDoubleClickEnabled, dialRestore == nil else { return }
         dialIdx[i] = max(0, min(15, v))
         defaults.set(dialIdx, forKey: "dialIdx")
@@ -619,6 +656,7 @@ final class VibeVM: ObservableObject {
         hbTimer = t
     }
     func beat() {
+        attemptNavigationStartup()
         guard let d = dev else {
             // 会话已被 teardownLink 拆掉（接收器拔出）。这条心跳转岗当重连探测：
             // 只在接收器确实插回来时才发起 connect()，否则每 3 秒就会把 status 刷成
@@ -633,6 +671,7 @@ final class VibeVM: ObservableObject {
     }
 
     func applyShortcut(_ i: Int) {
+        guard !navigationOwnsHardware else { return }
         guard let d = dev, let idx = VibeKitDevice.keyIndex(buttons[i].id) else { return }
         dropAppBinding(buttons[i].id)   // 三者互斥：改成快捷键/媒体键就不再是「打开 App」
         if let f = mediaFuncIndex(buttons[i].mainKey) {
@@ -708,6 +747,38 @@ final class VibeVM: ObservableObject {
 
     // MARK: 本地配置存档（Profile）
     init() {
+        defaults.removeObject(forKey: NavigationStartupGate.successPIDKey)
+        if dialRestore != nil {
+            navigationStartupRecoverySeen = true
+            navigationStartupGate.cancel()
+            codexWorkflow.message = "检测到上次旋钮恢复记录，本次自动导航暂停；核对配置后请手动启用。"
+        }
+        if let data = defaults.data(forKey: navigationRecoveryKey) {
+            navigationStartupRecoverySeen = true
+            navigationStartupGate.cancel()
+            if let journal = try? JSONDecoder().decode(NavigationCaptureJournal.self, from: data), journal.isValid {
+                navigationJournal = journal
+            } else { navigationRecoveryCorrupt = true }
+            navigationOwnsHardware = true; codexWorkflow.hasRecovery = true
+            codexWorkflow.message = "检测到未完成的键位恢复；连接设备后优先恢复。"
+        }
+        codexWorkflow.cancelPendingGestures = { [weak self] in self?.cancelNavigationGestures() }
+        codexWorkflow.routePhysicalFocus = { [weak self] wanted in self?.syncPhysicalFocusRoute(wanted) ?? false }
+        physicalRotaryMonitor.eligible = { [weak self] in
+            guard let self else { return false }
+            return self.codexWorkflow.nativeFocusActive && self.codexWorkflow.ready &&
+                !self.codexWorkflow.busy && self.connected && !self.quitting &&
+                self.codexWorkflow.navigation.stage == .openRequested &&
+                NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
+        }
+        physicalRotaryMonitor.onLongRelease = { [weak self] in self?.codexWorkflow.enter() }
+        physicalRotaryMonitor.onStatus = { [weak self] status in self?.codexWorkflow.physicalRotaryStatus = status }
+        codexWorkflow.retryPhysicalRotaryMonitoring = { [weak self] in
+            guard let self, self.codexWorkflow.ready else { return }
+            self.physicalRotaryMonitor.requestAccess()
+            self.physicalRotaryMonitor.stop()
+            self.codexWorkflow.refreshPhysicalFocusRoute()
+        }
         AppLifecycle.terminationCancelled = { [weak self] in
             guard let self else { return }
             self.quitting = false
@@ -717,7 +788,13 @@ final class VibeVM: ObservableObject {
         }
         AppLifecycle.prepareQuit = { [weak self] completion in
             guard let self else { completion(true); return }
-            self.prepareDialQuit(completion: completion)
+            self.quitting = true
+            self.codexWorkflow.stop()
+            self.restoreCodexNavigation { [weak self] ok in
+                guard let self else { completion(false); return }
+                if ok { self.prepareDialQuit(completion: completion) }
+                else { self.quitting = false; completion(false) }
+            }
         }
         // 名字回落匹配命中时，enforcer 会把解析出的真实 uid 回调回来——存下来，下次启动就能走
         // uid 精确匹配，不用再依赖子串匹配。回调可能在任意队列触发，切回主线程再碰 @Published/UserDefaults。
@@ -744,6 +821,7 @@ final class VibeVM: ObservableObject {
             // 存档组合注册不上的槽就是死的，如实标 sentinelDead；换键留给设备在场的 applyProfile。
             self?.startDialPermissionMonitoring()
             self?.registerStoredSentinels()
+            self?.registerNavigationRecoveryKeys()
             self?.connectIfNeeded()
         }
     }
@@ -845,6 +923,7 @@ final class VibeVM: ObservableObject {
     }
     /// 新增一个配置（用当前状态），并切为活动。
     func addProfile(_ name: String) {
+        guard !navigationOwnsHardware else { return }
         guard !dialGestureBusy, !applyingProfile, !quitting else { return }
         cancelDialClicks()
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines); guard !n.isEmpty else { return }
@@ -853,6 +932,7 @@ final class VibeVM: ObservableObject {
         setActive(n); activeUpdatedAt = now; saveTick &+= 1
     }
     func deleteProfile(_ name: String) {
+        guard !navigationOwnsHardware else { return }
         guard !dialGestureBusy, !applyingProfile, !quitting else { return }
         cancelDialClicks()
         var all = loadProfiles(); all[name] = nil; persistProfiles(all)
@@ -871,6 +951,7 @@ final class VibeVM: ObservableObject {
     }
     /// 切换/加载某配置：设为活动 + 回填 UI + 写入设备。
     func loadProfile(_ name: String) {
+        guard !navigationOwnsHardware else { return }
         guard !dialGestureBusy, !quitting else { return }
         guard let p = loadProfiles()[name] else { return }
         setActive(name)
@@ -880,6 +961,7 @@ final class VibeVM: ObservableObject {
 
     /// 把一份配置落地：回填 UI + 写入设备。连接时（本地为准）与手动切换配置共用。
     private func applyProfile(_ p: Profile, notifyName: String? = nil) {
+        guard !navigationOwnsHardware else { return }
         cancelDialClicks()
         dialGestureReady = false
         let applyID = UUID()
@@ -1026,6 +1108,7 @@ final class VibeVM: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.profileApplyID == applyID else { return }
                 self.applyingProfile = false
+                self.navigationStartupStateVerified = self.profileApplySucceeded && self.connected
                 if !self.quitting { self.syncDialGesture() }
                 if let name = notifyName {
                     let message = self.profileApplySucceeded && self.connected
@@ -1038,6 +1121,7 @@ final class VibeVM: ObservableObject {
         }
     }
     func clearShortcut(_ i: Int) {
+        guard !navigationOwnsHardware else { return }
         guard let d = dev, let idx = VibeKitDevice.keyIndex(buttons[i].id) else { return }
         dropAppBinding(buttons[i].id)
         mediaFunc[buttons[i].id] = nil; persistMediaFunc()
@@ -1057,6 +1141,7 @@ final class VibeVM: ObservableObject {
     /// 给某槽绑定「打开 App」。返回 false = 哨兵池耗尽（已写 sentinelNotice）。
     @discardableResult
     func bindApp(slot: String, bundleID: String, displayName: String, action: HostAction? = nil) -> Bool {
+        guard !navigationOwnsHardware else { return false }
         guard action == nil || slot == "dialP" else { return false }
         guard APP_BINDABLE_SLOTS.contains(slot), let idx = slotIndex(slot) else { return false }
         // 不在这里提前 unregister(slot)：taken 本就排除了本槽自己，
@@ -1096,6 +1181,7 @@ final class VibeVM: ObservableObject {
 
     /// 解绑：注销热键 + 清本地记账 + 清空设备该槽。
     func unbindApp(slot: String) {
+        guard !navigationOwnsHardware else { return }
         guard appBindings[slot] != nil else { return }
         dropAppBinding(slot)
         if let d = dev, let idx = slotIndex(slot), slot != "dialP" || (!dialDoubleClickEnabled && dialRestore == nil) {
@@ -1162,6 +1248,7 @@ final class VibeVM: ObservableObject {
 
     /// 哨兵热键被按下：激活绑定的 App。
     private func fireAppBinding(slot: String) {
+        guard !navigationOwnsHardware else { return }
         guard let ab = appBindings[slot] else { return }
         if ab.cyclesProfiles { cycleDialProfile(); return }
         do {
@@ -1191,7 +1278,7 @@ final class VibeVM: ObservableObject {
     /// applyProfile（那时 dev 在场，换完能立刻写进设备）。
     /// 顺带解决了启动时的重复劳动：init 换一次键、applyProfile 从存档改回去、再换一次。
     func registerStoredSentinels() {
-        HotKeyCenter.shared.unregisterAll(except: ["dialGesture"])
+        HotKeyCenter.shared.unregisterAll(except: navigationCaptureIDs.union(["dialGesture"]))
         var taken = Set<String>()
         for slot in APP_BINDABLE_SLOT_ORDER {
             guard let ab = appBindings[slot], let mk = ab.sentinelMainKey, !taken.contains(mk) else { continue }
@@ -1213,7 +1300,7 @@ final class VibeVM: ObservableObject {
     /// 根本不会进。届时两个进程都注册着同一个组合，事件归谁未测，绑定可能静默失效。
     /// 不做这件事的话，用户装个新软件就会让某个按键静默失效，而且毫无线索。
     func reregisterSentinels() {
-        HotKeyCenter.shared.unregisterAll(except: ["dialGesture"])
+        HotKeyCenter.shared.unregisterAll(except: navigationCaptureIDs.union(["dialGesture"]))
         var taken = Set<String>()
         var changed: [String] = []
         var changedSlots: [String] = []
@@ -1493,6 +1580,7 @@ extension VibeVM {
 
     /// Runs on the existing serial device queue, including restoration of an empty single action.
     private func syncDialGesture() {
+        guard !navigationOwnsHardware else { return }
         cancelDialClicks()
         dialGestureReady = false
         guard !quitting, !applyingProfile, connected, slotsHydrated, let device = dev,
@@ -1525,8 +1613,10 @@ extension VibeVM {
                     HotKeyCenter.shared.unregister("dialGesture")
                 }
                 if !succeeded || (capture != nil && didRestore) {
+                    self.navigationStartupStateVerified = false
                     self.dialGestureNotice = LocalizedMessage("旋钮设置未能写入设备，双击功能暂不可用。请重新连接设备后重试。")
                 }
+                self.attemptNavigationStartup()
             }
         }
     }
@@ -1583,6 +1673,7 @@ extension VibeVM {
     }
 
     private func cycleDialProfile() {
+        guard !navigationOwnsHardware else { return }
         guard !applyingProfile, !dialGestureBusy, !quitting, connected, slotsHydrated else { return }
         guard let next = ProfileCycle.next(names: profileNames, current: activeName),
               let profile = loadProfiles()[next] else {
@@ -1699,5 +1790,384 @@ extension VibeVM {
     private func promptDialPermissionRestart() {
         dialPermissionRestartRequired = true
         dialGestureNotice = LocalizedMessage("权限配置完成后，App 将自动重启。")
+    }
+}
+
+// MARK: - Opt-in Codex navigation and physical native-shortcut delivery
+extension VibeVM {
+    private func cancelNavigationGestures() {
+        navigationTimer?.invalidate(); navigationTimer = nil
+        navigationDial.cancel(); navigationExit.cancel()
+        // Rotation down/up barriers are kept until release across a context change.
+    }
+    private func resetNavigationGestures() {
+        navigationTimer?.invalidate(); navigationTimer = nil
+        navigationDial.reset(); navigationExit.reset(); navigationRotationHeld.removeAll()
+        selectorExitPress.reset()
+        selectorExitGeneration = nil
+    }
+    private func registerNavigationKey(slot: String, combo: SentinelCombo) -> Bool {
+        HotKeyCenter.shared.register(tokens: combo.tokens, id: "navigation." + slot,
+            released: { [weak self] in self?.navigationReleased(slot) }) { [weak self] in self?.navigationPressed(slot) }
+    }
+    /// Only register/unregister the existing capture. Real input is generated solely by the physical device.
+    private func syncPhysicalFocusRoute(_ wanted: Bool) -> Bool {
+        syncNativePageRoute(wanted)
+        guard let slot = navigationJournal?.slots.first(where: { $0.id == "dialP" }) else { return false }
+        let route = NativeFocusShortcut.route(configured: wanted && codexWorkflow.nativeFocusConfigured && slot.capture.mainKey == codexWorkflow.nativeFocusMainKey,
+            navigationReady: codexWorkflow.ready && connected && !quitting && !codexWorkflow.busy && !codexWorkflow.pageRoutingBusy,
+            contentSelected: codexWorkflow.navigation.stage == .openRequested,
+            frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            rotaryHeld: navigationDial.isHeld)
+        let lease = NativeFocusCaptureLease.apply(route: route,
+            isCaptured: { HotKeyCenter.shared.isRegistered("navigation.dialP") },
+            capture: { self.registerNavigationKey(slot: "dialP", combo: SentinelCombo(mainKey: slot.capture.mainKey)) },
+            release: { HotKeyCenter.shared.unregister("navigation.dialP") })
+        switch lease {
+        case .physicalShortcut:
+            navigationDial.reset()
+            _ = physicalRotaryMonitor.start(mainKey: slot.capture.mainKey)
+            return true
+        case .captured:
+            physicalRotaryMonitor.stop()
+            return false
+        case .captureFailed:
+            physicalRotaryMonitor.stop()
+            codexWorkflow.ready = false; codexWorkflow.hasRecovery = true
+            codexWorkflow.message = "旋钮导航捕获未能恢复，请关闭导航并恢复原键位后重试。"
+            return false
+        }
+    }
+    private func unregisterNavigationKeys() {
+        for id in navigationCaptureIDs { HotKeyCenter.shared.unregister(id) }
+    }
+    private func registerNavigationRecoveryKeys() {
+        guard let journal = navigationJournal, journal.isValid else { return }
+        for slot in journal.slots where slot.nativeBackspace != true {
+            _ = registerNavigationKey(slot: slot.id, combo: SentinelCombo(mainKey: slot.capture.mainKey))
+        }
+    }
+    private func navigationPressed(_ slot: String) {
+        guard codexWorkflow.ready, !codexWorkflow.busy, !codexWorkflow.pageRoutingBusy, connected, !quitting else { return }
+        if slot == "btn3", codexWorkflow.navigation.stage == .choosing {
+            if !selectorExitPress.isHeld { selectorExitGeneration = codexWorkflow.selectorGeneration }
+            selectorExitPress.press(); return
+        }
+        if slot == "btn3", navigationJournal?.slots.first(where: { $0.id == slot })?.nativeBackspace == true { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if slot == "dialP" { navigationActions(navigationDial.press(at: now), control: .dial) }
+        else if slot == "btn3" { navigationActions(navigationExit.press(at: now), control: .exit) }
+        else if navigationRotationHeld.insert(slot).inserted, !navigationDial.isHeld, !navigationExit.isHeld {
+            codexWorkflow.rotate(slot == "dialL" ? -1 : 1)
+        }
+        scheduleNavigationDeadline()
+    }
+    private func navigationReleased(_ slot: String) {
+        if slot == "btn3", selectorExitPress.isHeld {
+            let close = selectorExitPress.release()
+            let sameSelector = selectorExitGeneration == codexWorkflow.selectorGeneration
+            selectorExitGeneration = nil
+            if close, sameSelector, codexWorkflow.ready, !codexWorkflow.busy, !codexWorkflow.pageRoutingBusy,
+               connected, !quitting, codexWorkflow.navigation.stage == .choosing {
+                codexWorkflow.dismissSelector()
+            }
+            codexWorkflow.refreshPhysicalFocusRoute(); return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        if slot == "dialP" { navigationActions(navigationDial.release(at: now), control: .dial) }
+        else if slot == "btn3" { navigationActions(navigationExit.release(at: now), control: .exit) }
+        else { navigationRotationHeld.remove(slot) }
+        scheduleNavigationDeadline()
+        codexWorkflow.refreshPhysicalFocusRoute()
+    }
+    private func navigationActions(_ actions: [PressGesture.Action], control: CodexNavigation.Control) {
+        guard codexWorkflow.ready, !codexWorkflow.busy, !codexWorkflow.pageRoutingBusy, connected, !quitting else { return }
+        for action in actions { codexWorkflow.gesture(action, control: control) }
+    }
+    private func scheduleNavigationDeadline() {
+        navigationTimer?.invalidate(); navigationTimer = nil
+        guard codexWorkflow.ready, let deadline = [navigationDial.deadline, navigationExit.deadline].compactMap({ $0 }).min() else { return }
+        let timer = Timer(timeInterval: max(0.001, deadline - ProcessInfo.processInfo.systemUptime), repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                self.navigationActions(self.navigationDial.expire(at: now), control: .dial)
+                self.navigationActions(self.navigationExit.expire(at: now), control: .exit)
+                self.scheduleNavigationDeadline()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common); navigationTimer = timer
+    }
+
+    func setCodexNavigationEnabled(_ enabled: Bool, rememberChoice: Bool = true) {
+        let remember = rememberChoice && !CommandLine.arguments.contains("--navigation-hardware-check")
+        if remember { navigationStartupGate.cancel() }
+        if !enabled {
+            guard !codexWorkflow.busy else { return }
+            if remember { persistNavigationStartup(false) }
+            restoreCodexNavigation { [weak self] ok in if ok { self?.syncDialGesture() } }
+            return
+        }
+        guard !navigationOwnsHardware, !codexWorkflow.busy, !dialGestureBusy, !applyingProfile,
+              !quitting, connected, slotsHydrated, let device = dev else {
+            codexWorkflow.message = "请等待设备配置完成；存在恢复记录时请先恢复。"; return
+        }
+        let ids = ["dialP", "dialL", "dialR", "btn3"]
+        let indices = ids.compactMap { slotIndex($0) }
+        guard indices.count == 4, Set(indices).count == 4, indices.allSatisfy({ $0 < 10 }) else {
+            codexWorkflow.message = "旋钮标定与按钮槽位重叠，无法安全启用导航。"; return
+        }
+        var used = loadProfiles().values.flatMap { $0.buttons + $0.dial }
+        used += loadProfiles().values.flatMap { ($0.appBindings ?? [:]).values.map(\.sentinelTokens) }
+        used += buttons.map(\.tokens) + dial.map(\.tokens) + appBindings.values.map(\.sentinelTokens)
+        if let dialCaptureCombo { used.append(dialCaptureCombo.tokens) }
+        var captures: [String: SentinelCombo] = [:]
+        for slot in ids {
+            let selected: SentinelCombo?
+            if slot == "dialP", let key = codexWorkflow.preferredFocusCaptureKey {
+                let candidate = NativeFocusShortcut.preferredCombo(mainKey: key, used: used)
+                selected = candidate.flatMap { registerNavigationKey(slot: slot, combo: $0) ? $0 : nil }
+            } else {
+                selected = DialCaptureKeys.candidates(preferred: nil, used: used).first(where: {
+                    !captures.values.contains($0) && registerNavigationKey(slot: slot, combo: $0)
+                })
+            }
+            guard let combo = selected else {
+                unregisterNavigationKeys()
+                codexWorkflow.message = slot == "dialP" && codexWorkflow.preferredFocusCaptureKey != nil
+                    ? "原生聚焦组合键已被已有配置占用或无法注册。请关闭导航，换一个主键并重新绑定 Codex。原键位未改变。"
+                    : "没有足够的捕获组合键，原键位未改变。"
+                return
+            }
+            captures[slot] = combo; used.append(combo.tokens)
+        }
+        cancelDialClicks(); dialGestureReady = false; resetNavigationGestures()
+        navigationOwnsHardware = true; codexWorkflow.busy = true
+        codexWorkflow.message = "正在保存原键位并验证导航捕获；请先松开所有 VibeKey 按钮。"
+        let operation = UUID(); navigationOperation = operation
+        let legacyDial = dialRestore == nil ? nil : originalDialTokens
+        let captureList = ids.map { captures[$0]! }
+        io.async {
+            var records: [NavigationCaptureJournal.Slot] = []
+            let serial = device.getSN()
+            for (i, slot) in ids.enumerated() {
+                guard var tokens = retryRead(2, { device.getShortcut(index: indices[i]) }),
+                      var function = retryRead(2, { device.getButtonFixedFunction(index: indices[i]) }) else { break }
+                if slot == "dialP", let legacyDial {
+                    function = legacyDial.compactMap(mediaFuncIndex).first ?? 0
+                    tokens = function == 0 ? legacyDial : []
+                }
+                records.append(.init(id: slot, index: indices[i], original: tokens,
+                                     originalFunction: function, captureKey: captureList[i].mainKey,
+                                     nativeBackspace: slot == "btn3" ? true : nil))
+            }
+            let journal = NavigationCaptureJournal(deviceSerial: serial ?? "", slots: records)
+            DispatchQueue.main.async {
+                guard self.navigationOperation == operation, !self.quitting else { return }
+                guard journal.isValid else {
+                    self.navigationOwnsHardware = false; self.codexWorkflow.busy = false
+                    self.unregisterNavigationKeys(); self.codexWorkflow.message = "原键位或设备序列号读取不完整，未写入导航键位。"
+                    self.syncDialGesture(); return
+                }
+                guard let data = try? JSONEncoder().encode(journal) else { return }
+                self.defaults.set(data, forKey: self.navigationRecoveryKey)
+                guard self.defaults.synchronize() else {
+                    self.defaults.removeObject(forKey: self.navigationRecoveryKey)
+                    self.navigationOwnsHardware = false; self.codexWorkflow.busy = false
+                    self.unregisterNavigationKeys(); self.codexWorkflow.message = "无法保存恢复记录，未修改设备键位。"
+                    self.syncDialGesture(); return
+                }
+                self.navigationJournal = journal
+                self.io.async {
+                    let outcome = NavigationCaptureTransaction.install(slots: journal.slots,
+                        capture: { slot in (try? Self.writeDial(DialRestore(index: slot.index, tokens: slot.programmedTokens), to: device)) == true },
+                        restore: { Self.restoreNavigationSlot($0, device: device) })
+                    DispatchQueue.main.async {
+                        guard self.navigationOperation == operation, !self.quitting else { return }
+                        self.codexWorkflow.busy = false
+                        if outcome == .installed, self.connected {
+                            if remember { self.persistNavigationStartup(true) }
+                            if !rememberChoice {
+                                self.defaults.set(Int(ProcessInfo.processInfo.processIdentifier), forKey: NavigationStartupGate.successPIDKey)
+                                self.defaults.synchronize()
+                            }
+                            self.cancelNativePageRouting()
+                            // Never register plain Backspace: it belongs to the real keyboard device.
+                            HotKeyCenter.shared.unregister("navigation.btn3")
+                            HotKeyCenter.shared.unregister("dialGesture"); self.dialCaptureCombo = nil
+                            self.persistDialRestore(nil)
+                            self.codexWorkflow.ready = true; self.codexWorkflow.hasRecovery = false
+                            self.codexWorkflow.message = "硬件导航已启用：长按旋钮选择会话；第三键为原生退格，按住连续删除。请先聚焦输入框。"
+                        } else if outcome == .rolledBack, self.connected {
+                            self.finishNavigationRestore(); self.codexWorkflow.message = "导航键位核对失败，已恢复全部原键位。"
+                            self.syncDialGesture()
+                        } else {
+                            self.codexWorkflow.stop(); self.codexWorkflow.hasRecovery = true
+                            self.codexWorkflow.message = "设备写入或恢复未完成。请保持设备在线，点击重试恢复原键位。"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    nonisolated private static func restoreNavigationSlot(_ slot: NavigationCaptureJournal.Slot, device: VibeKitDevice) -> Bool {
+        func matches() -> Bool {
+            guard let tokens = retryRead(2, { device.getShortcut(index: slot.index) }),
+                  let function = retryRead(2, { device.getButtonFixedFunction(index: slot.index) }) else { return false }
+            return tokens == slot.original && function == slot.originalFunction
+        }
+        // Both banks must match. Retry only this idempotent restoration, with a fixed bound;
+        // a failed final read must retain the recovery journal.
+        for attempt in 0..<3 {
+            if matches() { return true }
+            if attempt > 0 { Thread.sleep(forTimeInterval: 0.12) }
+            do {
+                try device.setButtonFixedFunction(index: slot.index, funcIndex: slot.originalFunction)
+                Thread.sleep(forTimeInterval: 0.12)
+                try device.setShortcut(index: slot.index, tokens: slot.original)
+                Thread.sleep(forTimeInterval: 0.12)
+            } catch { continue }
+            if matches() { return true }
+            print("NAVIGATION_RESTORE_RETRY slot=\(slot.id) attempt=\(attempt + 1)")
+        }
+        return false
+    }
+    private func finishNavigationRestore() {
+        cancelNativePageRouting()
+        navigationJournal = nil; navigationRecoveryCorrupt = false
+        defaults.removeObject(forKey: navigationRecoveryKey); defaults.synchronize()
+        unregisterNavigationKeys(); navigationOwnsHardware = false
+        codexWorkflow.stop(); codexWorkflow.hasRecovery = false; codexWorkflow.busy = false
+        resetNavigationGestures()
+        // Legacy capture is reinstated only after its original action has been restored.
+        persistDialRestore(nil); dialCaptureCombo = nil; HotKeyCenter.shared.unregister("dialGesture")
+    }
+    private func restoreCodexNavigation(completion: @escaping (Bool) -> Void) {
+        navigationOperation = UUID(); codexWorkflow.stop(); resetNavigationGestures()
+        cancelNativePageRouting()
+        guard !navigationRecoveryCorrupt else {
+            codexWorkflow.busy = false; codexWorkflow.hasRecovery = true
+            codexWorkflow.message = "恢复记录无法解码。为保护原键位，已停止设备写入；请保留当前配置供排查。"
+            completion(false); return
+        }
+        guard let journal = navigationJournal else {
+            unregisterNavigationKeys(); navigationOwnsHardware = false; codexWorkflow.busy = false
+            codexWorkflow.message = "导航模式未启用。"; completion(true); return
+        }
+        guard connected, let device = dev else {
+            codexWorkflow.hasRecovery = true; codexWorkflow.busy = false
+            codexWorkflow.message = "设备不在线，恢复记录已保留；连接后会优先恢复。"
+            completion(false); return
+        }
+        codexWorkflow.busy = true; codexWorkflow.message = "正在核对设备身份并恢复原键位…"
+        io.async {
+            let sameDevice = device.getSN() == journal.deviceSerial
+            let restored = sameDevice && NavigationCaptureTransaction.restore(slots: journal.slots,
+                restore: { Self.restoreNavigationSlot($0, device: device) })
+            DispatchQueue.main.async {
+                self.codexWorkflow.busy = false
+                if restored {
+                    self.finishNavigationRestore(); self.codexWorkflow.message = "原键位已逐项读回核对并恢复。"
+                } else {
+                    self.codexWorkflow.hasRecovery = true
+                    self.codexWorkflow.message = sameDevice ? "原键位未全部恢复，请重试；恢复记录仍保留。" : "设备序列号不匹配，未向这台设备写入恢复数据。"
+                }
+                completion(restored)
+            }
+        }
+    }
+}
+
+extension VibeVM {
+    private func persistNavigationStartup(_ enabled: Bool) {
+        navigationStartupEnabled = enabled
+        defaults.set(enabled, forKey: NavigationStartupGate.preferenceKey)
+        if !defaults.synchronize() { codexWorkflow.message = "导航状态已改变，但未能保存下次启动设置。" }
+    }
+    func setNavigationStartupEnabled(_ enabled: Bool) {
+        navigationStartupGate.cancel()
+        persistNavigationStartup(enabled)
+    }
+    private func attemptNavigationStartup() {
+        let ready = connected && slotsHydrated && navigationStartupStateVerified && !applyingProfile &&
+            !dialGestureBusy && !quitting && !codexWorkflow.busy && !navigationOwnsHardware &&
+            !codexWorkflow.hasRecovery && navigationJournal == nil && !navigationRecoveryCorrupt
+        if navigationStartupGate.take(enabled: navigationStartupEnabled, deviceReady: ready,
+            recoverySeen: navigationStartupRecoverySeen,
+            diagnostic: CommandLine.arguments.contains("--navigation-hardware-check")) {
+            codexWorkflow.message = "正在按上次开启状态自动启用硬件导航…"
+            setCodexNavigationEnabled(true, rememberChoice: false)
+        }
+    }
+}
+
+extension VibeVM {
+    private func cancelNativePageRouting() {
+        nativePageRoute.reset(); codexWorkflow.pageRoutingBusy = false
+        codexWorkflow.nativePageStatus = "选择层保持旋钮导航键位。"
+    }
+    private func syncNativePageRoute(_ wantedContent: Bool) {
+        guard navigationJournal != nil, codexWorkflow.ready, connected, !quitting, !codexWorkflow.busy else { return }
+        guard !selectorExitPress.isHeld else { return }
+        let mode = NativePageScroll.desired(enabled: codexWorkflow.nativePageScrollEnabled,
+            ready: true, contentSelected: wantedContent && codexWorkflow.navigation.stage == .openRequested &&
+                !navigationDial.isHeld && navigationRotationHeld.isEmpty,
+            frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            selectorVisible: codexWorkflow.navigation.stage == .choosing)
+        if let operation = nativePageRoute.request(mode) { startNativePageRouting(operation) }
+    }
+    private func startNativePageRouting(_ operation: NativePageRouteState.Operation) {
+        codexWorkflow.pageRoutingBusy = true
+        codexWorkflow.nativePageStatus = "正在核对旋钮\(operation.mode == .pages ? "翻页" : "选择")键位，请稍候…"
+        writeNativePageMode(operation.mode) { [weak self] ok in
+            guard let self, self.nativePageRoute.operation == operation else { return }
+            let next = self.nativePageRoute.complete(operation, succeeded: ok)
+            if !ok {
+                self.codexWorkflow.pageRoutingBusy = false
+                self.codexWorkflow.ready = false; self.codexWorkflow.hasRecovery = true
+                self.codexWorkflow.nativePageStatus = "旋钮键位核对失败，恢复记录已保留。请关闭导航并恢复原键位。"
+                self.codexWorkflow.message = self.codexWorkflow.nativePageStatus
+                self.codexWorkflow.refreshPhysicalFocusRoute()
+                return
+            }
+            if let next { self.startNativePageRouting(next); return }
+            self.codexWorkflow.pageRoutingBusy = false
+            self.codexWorkflow.nativePageStatus = operation.mode == .pages
+                ? "真实硬件翻页已就绪：左转 PageUp，右转 PageDown。"
+                : operation.mode == .selection ? "列表键位已就绪：转动选择；底部键按下并松开关闭列表。"
+                : "列表已关闭；底部键恢复原生退格。"
+            self.codexWorkflow.refreshPhysicalFocusRoute()
+        }
+    }
+    private func writeNativePageMode(_ mode: NativePageScroll.Mode, completion: @escaping (Bool) -> Void) {
+        guard let journal = navigationJournal, journal.isValid, let device = dev,
+              connected, codexWorkflow.ready, !quitting else { completion(false); return }
+        if mode == .selection, let bottom = journal.slots.first(where: { $0.id == "btn3" && $0.nativeBackspace == true }),
+           !registerNavigationKey(slot: "btn3", combo: SentinelCombo(mainKey: bottom.capture.mainKey)) {
+            completion(false); return
+        }
+        let generation = navigationOperation
+        io.async {
+            let ok = device.getSN() == journal.deviceSerial && NativePageScroll.apply(slots: journal.slots, mode: mode,
+                writeAndVerify: { slot, tokens in
+                    (try? Self.writeDial(DialRestore(index: slot.index, tokens: tokens), to: device)) == true
+                })
+            DispatchQueue.main.async {
+                guard self.navigationOperation == generation else { return }
+                if ok, mode != .selection { HotKeyCenter.shared.unregister("navigation.btn3") }
+                completion(ok)
+            }
+        }
+    }
+    /// Explicit diagnostic only: the same write/readback backend, without opening or controlling Codex.
+    func checkNativePageHardware(_ mode: NativePageScroll.Mode, completion: @escaping (Bool) -> Void) {
+        guard CommandLine.arguments.contains("--verify-native-page-scroll"), !codexWorkflow.pageRoutingBusy else {
+            completion(false); return
+        }
+        codexWorkflow.pageRoutingBusy = true
+        writeNativePageMode(mode) { [weak self] ok in
+            self?.codexWorkflow.pageRoutingBusy = false
+            completion(ok)
+        }
     }
 }

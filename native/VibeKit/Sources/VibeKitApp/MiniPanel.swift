@@ -118,6 +118,11 @@ struct MiniPanel: View {
                     // 不影响其余功能），可接受。
                     dismiss()
                 }
+                menuRow(icon: "list.bullet.rectangle", title: "Codex 会话导航…") {
+                    openWindow(id: "codex-navigation")
+                    NSApp.activate(ignoringOtherApps: true)
+                    dismiss()
+                }
                 menuRow(icon: "power", title: L("退出 Open VibeKey")) { NSApp.terminate(nil) }
             }
         }

@@ -20,6 +20,7 @@ struct ShortcutEditor: View {
 
     @State private var hover = false
     @State private var showAppPicker = false
+    @State private var shortcutTooLong = false
 
     // 只有 btn1/2/3/dialP 能绑 App。旋钮左转/右转不行——连续转动会连发哨兵键。
     private var allowsAppBinding: Bool { APP_BINDABLE_SLOTS.contains(b.id) }
@@ -40,21 +41,38 @@ struct ShortcutEditor: View {
             HStack(spacing: 8) {
                 // 修饰键/主键任一改动即写入设备（无「应用」按钮）。只在用户交互处触发，
                 // 不用 onChange —— 否则设备回读回填也会被当成改动，形成写-读-写循环。
-                ForEach(MODS, id: \.token) { m in
-                    let on = !b.cyclesProfiles && b.mods.contains(m.token)
-                    Text(m.label)
-                        .frame(width: 28, height: 26)
+                ForEach(MODIFIER_CHOICES) { m in
+                    let on = !b.cyclesProfiles && !m.selection(in: b.mods).isEmpty
+                    Menu {
+                        Picker(m.name, selection: Binding<String>(
+                            get: { m.selection(in: b.mods) },
+                            set: { selection in
+                                commitChange { m.apply(selection, to: &$0.mods) }
+                            })) {
+                            Text(L("不使用")).tag("")
+                            Text(L("左") + " " + m.name + " " + m.symbol).tag(m.left)
+                            Text(L("右") + " " + m.name + " " + m.symbol).tag(m.right)
+                            // Preserve configurations read from a device with both sides held.
+                            if m.selection(in: b.mods) == "both" {
+                                Text(L("左右") + " " + m.name).tag("both")
+                            }
+                        }
+                    } label: {
+                        Text(m.label(in: b.mods))
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(minWidth: 38, minHeight: 26)
+                    }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
                         .background(on ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary.opacity(0.06)),
                                     in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                         .foregroundStyle(on ? Color.white : .primary)
-                        .opacity(b.cyclesProfiles ? 0.4 : 1)
+                        .disabled(b.cyclesProfiles)
                         .scaleEffect(on ? 1.08 : 1)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard !b.cyclesProfiles else { return }
-                            if on { b.mods.remove(m.token) } else { b.mods.insert(m.token) }
-                            onApply()
-                        }
+                        .accessibilityLabel(m.name)
+                        .accessibilityValue(m.selection(in: b.mods))
+                        .help(L("选择左侧或右侧修饰键"))
                         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: on)
                 }
                 // selection 用计算 Binding：绑了 App 就显示「打开 App」那一项。
@@ -66,8 +84,10 @@ struct ShortcutEditor: View {
                         if v == OPEN_APP_TOKEN || v == OPEN_APP_PICK_TOKEN { showAppPicker = true }
                         else if v == CYCLE_PROFILES_TOKEN { onCycleProfiles() }
                         else {
-                            if b.cyclesProfiles { b.mods = [] }
-                            b.mainKey = v; onApply()
+                            commitChange {
+                                if $0.cyclesProfiles { $0.mods = [] }
+                                $0.mainKey = v
+                            }
                         }
                     })) {
                     Text(L("主键")).tag(String?.none)
@@ -89,8 +109,15 @@ struct ShortcutEditor: View {
                 }.id(language.resolved)
                     .labelsHidden().frame(width: language.resolved == .english ? 160 : (b.id == "dialP" ? 140 : 100)).fixedSize()
                 Spacer(minLength: 6)
-                Button(L("清除")) { if isAppBound { onUnbindApp() } else { onClear() } }
+                Button(L("清除")) {
+                    shortcutTooLong = false
+                    if isAppBound { onUnbindApp() } else { onClear() }
+                }
                     .buttonStyle(GhostButtonStyle()).fixedSize()
+            }
+            if shortcutTooLong {
+                warnLine(L("设备最多支持 4 个键位条目，请先减少修饰键。"))
+                    .font(.caption2)
             }
             if b.cyclesProfiles {
                 Text(L("这是旧版单击切换动作。使用双击开关时，请将单击改为所需的快捷键、媒体键或 App。"))
@@ -140,6 +167,18 @@ struct ShortcutEditor: View {
         .sheet(isPresented: $showAppPicker) {
             AppPickerSheet { onBindApp($0) }
         }
+    }
+
+    private func commitChange(_ change: (inout ButtonState) -> Void) {
+        var candidate = b
+        change(&candidate)
+        guard candidate.hasValidShortcutLength else {
+            shortcutTooLong = true
+            return
+        }
+        shortcutTooLong = false
+        b = candidate
+        onApply()
     }
 }
 
@@ -399,23 +438,29 @@ struct ConnectorOverlay: View {
 
 struct DeviceImageView: View {
     @ObservedObject private var language = AppLanguage.shared
-    private static let img: NSImage? = {
+    static func imageResourceURL(in bundle: Bundle = .main) -> URL? {
         let bundleName = "VibeKit_VibeKitApp.bundle"
         // SwiftPM 生成的资源目录不一定有 Info.plist，不能把它交给 Bundle(path:)
         // 解析；发布到另一台 Mac 后该初始化会返回 nil，即使 PNG 实际已经在包中。
         // 直接从资源 URL 读取，同时覆盖 swift run 与 .app 两种目录结构。
         let roots = [
-            Bundle.main.resourceURL,
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources")
+            bundle.resourceURL,
+            bundle.bundleURL.appendingPathComponent("Contents/Resources")
         ]
         for root in roots.compactMap({ $0 }) {
-            let url = root.appendingPathComponent(bundleName).appendingPathComponent("device.png")
-            if FileManager.default.isReadableFile(atPath: url.path) {
-                return NSImage(contentsOf: url)
+            let resources = root.appendingPathComponent(bundleName)
+            // SwiftPM uses a flat resource directory on older toolchains and
+            // a macOS bundle with Contents/Resources on newer toolchains.
+            for relative in ["device.png", "Contents/Resources/device.png"] {
+                let url = resources.appendingPathComponent(relative)
+                if FileManager.default.isReadableFile(atPath: url.path) {
+                    return url
+                }
             }
         }
         return nil
-    }()
+    }
+    private static let img = imageResourceURL().flatMap { NSImage(contentsOf: $0) }
 
     var body: some View {
         let imgW = DeviceGeom.imgW, imgH = DeviceGeom.imgH

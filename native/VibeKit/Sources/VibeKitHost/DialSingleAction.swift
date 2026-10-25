@@ -33,10 +33,14 @@ public enum DialSingleAction {
     ]
     private static func flag(_ token: String) -> CGEventFlags {
         switch token {
-        case "LCmd", "RCmd": return .maskCommand
-        case "LOpt", "ROpt": return .maskAlternate
-        case "LCtrl", "RCtrl": return .maskControl
-        case "LShift", "RShift": return .maskShift
+        case "LCmd": return .maskCommand.union(CGEventFlags(rawValue: UInt64(NX_DEVICELCMDKEYMASK)))
+        case "RCmd": return .maskCommand.union(CGEventFlags(rawValue: UInt64(NX_DEVICERCMDKEYMASK)))
+        case "LOpt": return .maskAlternate.union(CGEventFlags(rawValue: UInt64(NX_DEVICELALTKEYMASK)))
+        case "ROpt": return .maskAlternate.union(CGEventFlags(rawValue: UInt64(NX_DEVICERALTKEYMASK)))
+        case "LCtrl": return .maskControl.union(CGEventFlags(rawValue: UInt64(NX_DEVICELCTLKEYMASK)))
+        case "RCtrl": return .maskControl.union(CGEventFlags(rawValue: UInt64(NX_DEVICERCTLKEYMASK)))
+        case "LShift": return .maskShift.union(CGEventFlags(rawValue: UInt64(NX_DEVICELSHIFTKEYMASK)))
+        case "RShift": return .maskShift.union(CGEventFlags(rawValue: UInt64(NX_DEVICERSHIFTKEYMASK)))
         default: return []
         }
     }
@@ -58,17 +62,20 @@ public enum DialSingleAction {
         }
         let source = CGEventSource(stateID: .privateState)
         var flags: CGEventFlags = []
+        var heldModifiers: Set<String> = []
         var result: [CGEvent] = []
         let ordered = tokens.filter { VibeKitKeymap.isModifierToken($0) }
             + tokens.filter { !VibeKitKeymap.isModifierToken($0) }
         for token in ordered {
-            flags.formUnion(flag(token))
+            if VibeKitKeymap.isModifierToken(token) { heldModifiers.insert(token) }
+            flags = heldModifiers.reduce(CGEventFlags()) { $0.union(flag($1)) }
             guard let code = keyCodes[token], let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)
             else { throw Failure.eventCreation }
             event.flags = flags; result.append(event)
         }
         for token in ordered.reversed() {
-            flags.subtract(flag(token))
+            heldModifiers.remove(token)
+            flags = heldModifiers.reduce(CGEventFlags()) { $0.union(flag($1)) }
             guard let code = keyCodes[token], let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)
             else { throw Failure.eventCreation }
             event.flags = flags; result.append(event)

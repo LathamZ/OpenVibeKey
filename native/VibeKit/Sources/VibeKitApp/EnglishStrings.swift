@@ -1,6 +1,12 @@
 // English translations for app-owned Chinese display keys. Keep placeholders unchanged.
 enum EnglishStrings {
     static let values: [String: String] = [
+        "左": "L",
+        "右": "R",
+        "左右": "L+R",
+        "不使用": "Off",
+        "选择左侧或右侧修饰键": "Choose the left or right modifier key",
+        "设备最多支持 4 个键位条目，请先减少修饰键。": "The device supports up to 4 key entries. Remove a modifier first.",
         "权限已全部授予": "All permissions granted",
         "权限待完善": "Permissions required",
         "正在检查权限…": "Checking permissions…",

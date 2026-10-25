@@ -15,6 +15,7 @@ struct ContentView: View {
     // 状态归属在 App 层（见 VibeKitApp）：迷你面板与设置窗必须共用同一个 VibeVM，
     // 否则两个实例会各开一次 HID、各跑一份心跳，争抢厂商口。
     @EnvironmentObject var vm: VibeVM
+    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject var mic: MicMeter
     @State private var showInfoPop = false
     @State private var confirmReboot = false
@@ -37,20 +38,32 @@ struct ContentView: View {
             Rectangle().fill(.ultraThinMaterial).opacity(0.35).ignoresSafeArea()
 
             VStack(spacing: 16) {
-                header
+                header.disabled(vm.navigationOwnsHardware)
+                HStack {
+                    Button("Codex 会话导航…") {
+                        openWindow(id: "codex-navigation")
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                    if vm.navigationOwnsHardware {
+                        Text("导航正在接管旋钮和底部键；恢复原键位后可编辑配置。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
                 // 哨兵提示与离线绑定区块都必须在**所有**连接状态下渲染。
                 // 主机侧热键的寿命跟的是进程，不是设备：设备离线时那几个 ⌃⌥⌘F9 照样被本
                 // 进程全局吃掉。早先这两样都埋在只有 vm.connected 才渲染的快捷键卡里，
                 // 于是设备一离线（或厂商口被 CLI 抢了导致误判离线），用户既看不到
                 // 「找不到该 App」这类只有离线才会触发的提示，也没有任何办法解绑——只能退 App。
-                sentinelNoticeBanner
-                if !vm.connected { offlineAppBindingsCard }
+                sentinelNoticeBanner.disabled(vm.navigationOwnsHardware)
+                if !vm.connected { offlineAppBindingsCard.disabled(vm.navigationOwnsHardware) }
                 if vm.connected {
                     HStack(alignment: .top, spacing: 16) {
                         deviceColumn(showHint: true)
                         shortcutsCard.frame(maxWidth: .infinity)
                         VStack(spacing: 14) { ledCard; micTuneCard; micCard }.frame(width: language.resolved == .english ? 300 : 264)
                     }
+                    .disabled(vm.navigationOwnsHardware)
                     .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97, anchor: .top)),
                                             removal: .opacity))
                 } else if vm.linkPresent {

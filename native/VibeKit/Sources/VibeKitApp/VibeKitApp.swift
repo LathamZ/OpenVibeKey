@@ -16,6 +16,48 @@ struct VibeKitApp: App {
 
     init() {
         // @StateObject initializers are lazy. Exit before body/VM/device setup in probe mode.
+        if let index = CommandLine.arguments.firstIndex(of: "--navigation-startup-check"), index + 1 < CommandLine.arguments.count {
+            runNavigationStartupCheck(outputPath:CommandLine.arguments[index + 1])
+            exit(1)
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--physical-rotary-monitor-check"), index + 1 < CommandLine.arguments.count {
+            exit(runPhysicalRotaryMonitorCheck(outputPath: CommandLine.arguments[index + 1]))
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--native-focus-setup-preview"), index + 1 < CommandLine.arguments.count {
+            runNativeFocusSetupPreview(outputPath: CommandLine.arguments[index + 1])
+            exit(0)
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--hardware-event-probe"),
+           index + 1 < CommandLine.arguments.count {
+            exit(runHardwareEventProbe(outputPath: CommandLine.arguments[index + 1]))
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--codex-thread-list-check"), index + 1 < CommandLine.arguments.count {
+            exit(runCodexThreadListCheck(outputPath: CommandLine.arguments[index + 1]))
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--navigation-hardware-check"), index + 1 < CommandLine.arguments.count {
+            runNavigationHardwareCheck(outputPath: CommandLine.arguments[index + 1])
+            exit(1)
+        }
+        if CommandLine.arguments.contains("--codex-navigation-preview") {
+            runCodexNavigationPreview()
+            exit(0)
+        }
+        if CommandLine.arguments.contains("--modifier-self-test") {
+            exit(runModifierSelfTest())
+        }
+        if CommandLine.arguments.contains("--resource-self-test") {
+            guard let url = DeviceImageView.imageResourceURL(),
+                  let image = NSImage(contentsOf: url), image.isValid else {
+                print("FAIL: device image could not be loaded from the app resources")
+                exit(1)
+            }
+            print("Device image loaded: \(Int(image.size.width)) x \(Int(image.size.height)) from \(url.path)")
+            exit(0)
+        }
+        if CommandLine.arguments.contains("--modifier-preview") {
+            runModifierPreview()
+            exit(0)
+        }
         if CommandLine.arguments.contains(DialPermissionProbe.argument) {
             exit(AXIsProcessTrusted() ? 0 : 1)
         }
@@ -48,6 +90,11 @@ struct VibeKitApp: App {
                 .environmentObject(vm)
                 .environmentObject(mic)
                 .environment(\.locale, language.locale)
+        }
+        .windowResizability(.contentSize)
+
+        Window("Codex 会话导航", id: "codex-navigation") {
+            CodexNavigationSettings(vm: vm, controller: vm.codexWorkflow)
         }
         .windowResizability(.contentSize)
     }

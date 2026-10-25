@@ -39,8 +39,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
                 // A user decision must not race the automatic restart timeout.
                 Self.terminationID = UUID()
                 let alert = NSAlert()
-                alert.messageText = L("尚未恢复旋钮的单击设置")
-                alert.informativeText = L("设备可能已断开。现在退出后，旋钮按下可能暂时无效；下次连接并启动 App 时会恢复。")
+                alert.messageText = L("尚未恢复设备键位")
+                alert.informativeText = L("设备可能已断开。现在退出后，导航接管的按键可能暂时无效；恢复记录会保留，下次连接并启动 App 时优先恢复。")
                 alert.addButton(withTitle: L("取消退出"))
                 alert.addButton(withTitle: L("仍然退出"))
                 Self.finishTermination(sender, allowed: alert.runModal() == .alertSecondButtonReturn)
