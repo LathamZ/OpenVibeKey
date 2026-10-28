@@ -771,6 +771,8 @@ final class VibeVM: ObservableObject {
                 self.codexWorkflow.navigation.stage == .openRequested &&
                 NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
         }
+        physicalRotaryMonitor.onShortRelease = { [weak self] in self?.codexWorkflow.toggleRotaryMode() }
+        codexWorkflow.cancelPhysicalRotaryGesture = { [weak self] in self?.physicalRotaryMonitor.cancelGesture() }
         physicalRotaryMonitor.onLongRelease = { [weak self] in self?.codexWorkflow.enter() }
         physicalRotaryMonitor.onStatus = { [weak self] status in self?.codexWorkflow.physicalRotaryStatus = status }
         codexWorkflow.retryPhysicalRotaryMonitoring = { [weak self] in
@@ -1997,6 +1999,7 @@ extension VibeVM {
                             HotKeyCenter.shared.unregister("dialGesture"); self.dialCaptureCombo = nil
                             self.persistDialRestore(nil)
                             self.codexWorkflow.ready = true; self.codexWorkflow.hasRecovery = false
+                            if !CommandLine.arguments.contains("--navigation-hardware-check") { self.codexWorkflow.refreshPhysicalFocusRoute() }
                             self.codexWorkflow.message = "硬件导航已启用：长按旋钮选择会话；第三键为原生退格，按住连续删除。请先聚焦输入框。"
                         } else if outcome == .rolledBack, self.connected {
                             self.finishNavigationRestore(); self.codexWorkflow.message = "导航键位核对失败，已恢复全部原键位。"
@@ -2113,12 +2116,12 @@ extension VibeVM {
             ready: true, contentSelected: wantedContent && codexWorkflow.navigation.stage == .openRequested &&
                 !navigationDial.isHeld && navigationRotationHeld.isEmpty,
             frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-            selectorVisible: codexWorkflow.navigation.stage == .choosing)
+            selectorVisible: codexWorkflow.navigation.stage == .choosing, editing: codexWorkflow.rotaryEditing)
         if let operation = nativePageRoute.request(mode) { startNativePageRouting(operation) }
     }
     private func startNativePageRouting(_ operation: NativePageRouteState.Operation) {
         codexWorkflow.pageRoutingBusy = true
-        codexWorkflow.nativePageStatus = "正在核对旋钮\(operation.mode == .pages ? "翻页" : "选择")键位，请稍候…"
+        codexWorkflow.nativePageStatus = "正在核对旋钮\(operation.mode == .pages ? "翻页" : operation.mode == .arrows ? "左右移动" : "选择")键位，请稍候…"
         writeNativePageMode(operation.mode) { [weak self] ok in
             guard let self, self.nativePageRoute.operation == operation else { return }
             let next = self.nativePageRoute.complete(operation, succeeded: ok)
@@ -2135,7 +2138,7 @@ extension VibeVM {
             self.codexWorkflow.nativePageStatus = operation.mode == .pages
                 ? "真实硬件翻页已就绪：左转 PageUp，右转 PageDown。"
                 : operation.mode == .selection ? "列表键位已就绪：转动选择；底部键按下并松开关闭列表。"
-                : "列表已关闭；底部键恢复原生退格。"
+                : operation.mode == .arrows ? "左右移动已就绪：左转 ←，右转 →；底部键为退格。" : "旋钮导航键位已恢复。"
             self.codexWorkflow.refreshPhysicalFocusRoute()
         }
     }

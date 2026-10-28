@@ -36,6 +36,17 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     @Published private(set) var nativeFocusActive = false
     var routePhysicalFocus: ((Bool) -> Bool)?
     @Published private(set) var nativePageScrollEnabled = true
+    @Published private(set) var rotaryEditing = false
+    var cancelPhysicalRotaryGesture: (() -> Void)?
+    var rotaryModeLabel: String { rotaryEditing ? "编辑 · ←／→" : "浏览 · PageUp／PageDown" }
+    func toggleRotaryMode() {
+        guard ready, !busy, !pageRoutingBusy,
+              navigation.stage == .openRequested,
+              NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex" else { return }
+        rotaryEditing.toggle()
+        refreshPhysicalFocusRoute()
+        showNotice("Codex：" + rotaryModeLabel + "；长按旋钮返回列表。")
+    }
     @Published var pageRoutingBusy = false
     @Published var nativePageStatus = "选择层保持旋钮导航键位。"
     @Published var physicalRotaryStatus = "进入会话后检查旋钮监听。"
@@ -73,6 +84,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
                 Task { @MainActor [weak self] in
                     guard let self, self.ready else { return }
+                    self.cancelPhysicalRotaryGesture?()
                     if app.bundleIdentifier == "com.openai.codex" {
                         self.refreshPhysicalFocusRoute(); return
                     }
@@ -80,7 +92,13 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                         self.nativeFocusActive = self.routePhysicalFocus?(false) ?? false
                         return
                     }
-                    self.suspend(message: "已暂停：你切换到了其他应用。长按旋钮重新进入。")
+                    if self.navigation.stage == .openRequested {
+                        // Preserve the selected Codex context across app switches. Only hardware mapping changes.
+                        self.refreshPhysicalFocusRoute()
+                        self.message = "其他 App：旋钮默认 ←／→；回到 Codex 后恢复" + self.rotaryModeLabel
+                    } else {
+                        self.suspend(message: "其他 App：旋钮默认 ←／→；长按旋钮可选择 Codex 会话。")
+                    }
                 }
             }
     }
@@ -188,6 +206,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         guard (ready || preview), !pageRoutingBusy else { return }
         if action == .long { enter(); return }
         if selectorLoading, control == .dial { return }
+        if action == .single, control == .dial, navigation.stage == .openRequested {
+            toggleRotaryMode(); return
+        }
         let previous = navigation.stage
         let effects = navigation.gesture(action, control: control, sessions: sessions)
         if previous != navigation.stage { cancelPendingGestures?() }
@@ -237,6 +258,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 guard let self, self.navigation.requestID == request else { return }
                 self.navigation.dispatched(request: request, session: session, accepted: error == nil)
                 if error == nil {
+                    self.rotaryEditing = false
                     self.refreshPhysicalFocusRoute()
                     self.message = self.nativeFocusConfigured
                         ? "已请求打开“\(session.title)”。再单击旋钮聚焦后，可用第三键退格；长按旋钮并松开返回列表（需输入监控）。"
@@ -363,7 +385,7 @@ struct CodexNavigationSettings: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Codex 会话导航 · 验证版").font(.title2.bold())
             Text("长按旋钮选择会话，转动切换候选，单击请求打开。")
-            Text("进入会话后可单击旋钮聚焦；启用翻页试验时，左右转动发出 PageUp／PageDown。有输入监控权限时，长按旋钮并松开返回列表。第三键用于退格。")
+            Text("进入会话后单击旋钮切换编辑 ←／→ 和浏览 PageUp／PageDown；其他 App 默认 ←／→。长按旋钮并松开返回列表。第三键用于退格。")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
                 Button(controller.hasRecovery ? "重试恢复原键位" : controller.ready ? "关闭并恢复原键位" : "启用硬件导航") {
@@ -505,7 +527,7 @@ private struct NativeFocusSetupView: View {
                     Toggle("我已完成绑定，启用原生聚焦", isOn: Binding(get: { controller.nativeFocusConfigured }, set: {
                         controller.configureNativeFocus(enabled: $0, mainKey: controller.nativeFocusMainKey)
                     })).disabled(locked)
-                    Text("内容层单击旋钮直接聚焦。启用输入监控后，按住旋钮至少 0.65 秒并松开可返回列表；长按期间 Codex 也会收到聚焦键。也可从菜单栏点击“选择会话”。")
+                    Text("内容层短按旋钮切换编辑／浏览并发出原生聚焦键。启用输入监控后，按住旋钮至少 0.65 秒并松开可返回列表；长按期间 Codex 也会收到聚焦键。也可从菜单栏点击“选择会话”。")
                         .font(.caption).foregroundStyle(.secondary)
                     Text(controller.physicalRotaryStatus).font(.caption).foregroundStyle(.secondary)
                     Button("授权／重试旋钮长按监听") { controller.retryPhysicalRotaryMonitoring?() }
@@ -532,14 +554,15 @@ private struct NativeBackspaceHelpView: View {
 private struct NativePagesSetupView: View {
     @ObservedObject var controller: CodexWorkflowController
     var body: some View {
-        GroupBox("旋钮原生翻页 · 实机验证") {
+        GroupBox("旋钮：编辑／浏览") {
             VStack(alignment: .leading, spacing: 6) {
-                Toggle("启用 PageUp／PageDown 翻页试验", isOn: Binding(
+                Text("Codex 当前模式：" + controller.rotaryModeLabel).fontWeight(.semibold)
+                Toggle("浏览模式启用 PageUp／PageDown", isOn: Binding(
                     get: { controller.nativePageScrollEnabled }, set: { controller.configureNativePages($0) }))
                     .disabled(controller.busy || controller.pageRoutingBusy)
                 Text(controller.nativePageStatus)
-                Text("选择层仍转动切换会话；已请求打开会话且 Codex 在前台时，读回核对旋钮键位后，左转发 PageUp、右转发 PageDown。单击旋钮仍是聚焦，长按并松开返回列表。")
-                Text("翻页跟随原生键盘焦点，正文滚动效果待你实测。若只移动输入光标，请先手动点击正文再转动；需要输入时单击旋钮回到输入框。此试验不使用鼠标滚轮注入，也不自动点击正文。")
+                Text("启用导航期间，其他 App 旋钮始终为 ←／→。Codex 打开会话后默认浏览；单击进入编辑并聚焦输入框，再单击切回浏览。长按至少 0.65 秒并松开只返回列表，不切换编辑模式；列表仍转动选择会话。")
+                Text("单击沿用真实硬件聚焦快捷键；每次短按释放切换模式，不模拟输入。切回浏览不会自动聚焦正文；PageUp／PageDown 跟随当前焦点，若未翻页请手动点击正文。切换 App 不清除 Codex 模式，回到 Codex 后恢复。关闭导航仍恢复原键位。")
                 Text("双击提交恢复任务尚未接入；提交键保持原有行为。")
             }.font(.caption).foregroundStyle(.secondary).padding(6)
         }

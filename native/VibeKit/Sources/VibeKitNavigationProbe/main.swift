@@ -249,5 +249,41 @@ do {
  for _ in 0..<5 { _=gate.take(enabled:true,deviceReady:false,recoverySeen:false,diagnostic:false) }
  check("late device arrival enables once",gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
 }
+// Edit/browse and cross-app routing must never turn a long hold into a short toggle.
+do {
+ for front in [nil, "com.other.app", "com.openai.codex.fake"] as [String?] {
+  for editing in [false,true] {
+   check("non-Codex defaults to arrows regardless of Codex mode", NativePageScroll.desired(enabled:true,ready:true,contentSelected:true,frontmostBundleID:front,editing:editing) == .arrows)
+  }
+ }
+ check("Codex edit mode arrows", NativePageScroll.desired(enabled:true,ready:true,contentSelected:true,frontmostBundleID:"com.openai.codex",editing:true) == .arrows)
+ check("Codex browsing pages", NativePageScroll.desired(enabled:true,ready:true,contentSelected:true,frontmostBundleID:"com.openai.codex",editing:false) == .pages)
+ check("no content defaults to arrows", NativePageScroll.desired(enabled:true,ready:true,contentSelected:false,frontmostBundleID:"com.openai.codex") == .arrows)
+ check("disabled browsing still arrows", NativePageScroll.desired(enabled:false,ready:true,contentSelected:true,frontmostBundleID:"com.openai.codex") == .arrows)
+ check("selector precedence over edits", NativePageScroll.desired(enabled:true,ready:true,contentSelected:true,frontmostBundleID:"com.openai.codex",selectorVisible:true,editing:true) == .selection)
+ check("not-ready retains capture", NativePageScroll.desired(enabled:true,ready:false,contentSelected:true,frontmostBundleID:"com.other.app",editing:true) == .navigation)
+ check("native left arrow",NativePageScroll.tokens(slot:slots[1],mode:.arrows) == ["Left"])
+ check("native right arrow",NativePageScroll.tokens(slot:slots[2],mode:.arrows) == ["Right"])
+ var s=NativePageRouteState();let p=s.request(.pages)!
+ check("app switch queues arrows",s.request(.arrows) == nil)
+ let a=s.complete(p,succeeded:true)!
+ check("app switch wins in-flight pages",a.mode == .arrows)
+ _=s.complete(a,succeeded:true)
+ check("arrows active after coalesced change",s.applied == .arrows && s.operation == nil)
+ for duration in [0.08,0.2,0.649,0.65,2.0] {
+  var h=PhysicalRotaryHold()
+  check("press does not toggle or navigate",h.action(down:true,at:1,eligible:true) == nil)
+  check("repeat down is not a toggle",h.action(down:true,at:1+duration/2,eligible:true) == nil)
+  check("exclusive short/long release",h.action(down:false,at:1+duration,eligible:true) == (duration < 0.65 ? .short : .long))
+  check("duplicate release silent",h.action(down:false,at:5,eligible:true) == nil)
+ }
+ var h=PhysicalRotaryHold();_=h.action(down:true,at:0,eligible:true);h.cancel()
+ check("foreground change cancels short toggle",h.action(down:false,at:0.2,eligible:true) == nil)
+ h=PhysicalRotaryHold();_=h.action(down:true,at:0,eligible:true)
+ check("release in another app cannot toggle",h.action(down:false,at:0.2,eligible:false) == nil)
+ h=PhysicalRotaryHold(initiallyHeld:true)
+ check("key held at startup cannot toggle",h.action(down:false,at:2,eligible:true) == nil)
+}
+
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
 exit(failures == 0 ? 0 : 1)

@@ -44,6 +44,10 @@ private final class NavigationHardwareCheck {
                         guard let self else { return }
                         guard ok else { self.finish(success: false, reason: "page-key readback failed"); return }
                         self.rows.append(["stage": "native_page_keys_readback_verified", "left": ["PageUp"], "right": ["PageDown"]])
+                        self.vm.checkNativePageHardware(.arrows) { [weak self] arrows in
+                            guard let self else { return }
+                            guard arrows else { self.finish(success: false, reason: "arrow-key readback failed"); return }
+                            self.rows.append(["stage": "native_arrow_keys_readback_verified", "left": ["Left"], "right": ["Right"]])
                         self.vm.checkNativePageHardware(.selection) { [weak self] restored in
                             guard let self else { return }
                             guard restored else { self.finish(success: false, reason: "selector-key readback failed"); return }
@@ -60,6 +64,7 @@ private final class NavigationHardwareCheck {
                                 self.phase = "restoring"; self.vm.setCodexNavigationEnabled(false)
                             }
                         }
+                    }
                     }
                 } else { phase = "restoring"; vm.setCodexNavigationEnabled(false) }
             } else if !vm.codexWorkflow.busy {

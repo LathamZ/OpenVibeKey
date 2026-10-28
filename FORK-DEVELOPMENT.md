@@ -48,7 +48,7 @@ swift run -c release VibeKitThreadListProbe
 swift run -c release VibeKitHostProbe
 ```
 
-The first two probes contain 166 navigation/startup/recovery and 92 focus/hold checks at this
+The first two probes contain 206 navigation/startup/recovery and 92 focus/hold checks at this
 snapshot. Thread-list probes use a local Python fixture, not the real Codex account. The above
 probes do not change hardware settings. Focus/host probes temporarily register and release real
 Carbon hotkeys; run them in a normal desktop session with the device controller quit to avoid
@@ -99,3 +99,24 @@ The broad snapshot branch is a development checkpoint, not yet a narrowly scoped
 Before each PR, compare with current upstream, isolate the change and rerun relevant checks.
 Personal evidence, chat lists, preferences, hardware logs and signing configuration belong outside
 this public repository. Do not add app bundles or `.build` products to Git.
+
+## lr.11: rotary editing and browsing
+
+While hardware navigation is enabled, rotary turns default to physical Left/Right in other apps
+(and before a Codex chat has been selected). The selector retains its captured direction keys.
+After opening a chat through VibeKey, Codex starts in browsing mode (PageUp/PageDown). A short
+rotary press/release toggles editing (Left/Right) and browsing. The existing physical composer-focus
+shortcut is still delivered; no focus event is synthesized or replayed. Without a configured native
+focus shortcut, captured single clicks can toggle mapping but cannot focus the composer automatically.
+A long hold/release only returns to the selector. Mode changes show an owned nonactivating notice;
+the menu and navigation settings show the remembered Codex mode. App switches preserve that mode
+but always use arrows outside Codex. Closing navigation restores the saved original hardware mappings.
+
+A browsing-mode click still delivers the physical focus shortcut. There is no direct body-focus
+command in this implementation: paging depends on actual focus and requires physical acceptance.
+The frontend neither reads Codex input content nor checks whether the visible chat is the deep-linked chat.
+
+Regression probes cover exclusive short/long release, cancelled/context-crossing holds, initial held
+keys, selector precedence, cross-app defaults and coalesced USB routing. The hardware diagnostic
+additionally reads back PageUp/PageDown, Left/Right, selector keys and original mappings. Passing
+that diagnostic does not establish the real editing/browsing workflow without operator testing.

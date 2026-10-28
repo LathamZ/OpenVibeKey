@@ -2,13 +2,18 @@ import Foundation
 
 /// Physical device key configuration only. Never generates or posts a host input event.
 public enum NativePageScroll {
-    public enum Mode: String, Equatable, Sendable { case navigation, selection, pages }
-    public static func desired(enabled: Bool, ready: Bool, contentSelected: Bool, frontmostBundleID: String?, selectorVisible: Bool = false) -> Mode {
+    public enum Mode: String, Equatable, Sendable { case navigation, selection, pages, arrows }
+    public static func desired(enabled: Bool, ready: Bool, contentSelected: Bool, frontmostBundleID: String?, selectorVisible: Bool = false, editing: Bool = false) -> Mode {
         if ready && selectorVisible { return .selection }
-        return enabled && ready && contentSelected && frontmostBundleID == "com.openai.codex" ? .pages : .navigation
+        guard ready else { return .navigation }
+        return enabled && contentSelected && frontmostBundleID == "com.openai.codex" && !editing ? .pages : .arrows
     }
     public static func tokens(slot: NavigationCaptureJournal.Slot, mode: Mode) -> [String] {
         if mode == .selection, slot.id == "btn3", slot.nativeBackspace == true { return slot.capture.tokens }
+        if mode == .arrows {
+            if slot.id == "dialL" { return ["Left"] }
+            if slot.id == "dialR" { return ["Right"] }
+        }
         guard mode == .pages else { return slot.programmedTokens }
         if slot.id == "dialL" { return ["PageUp"] }
         if slot.id == "dialR" { return ["PageDown"] }

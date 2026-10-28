@@ -12,6 +12,8 @@ final class PhysicalRotaryMonitor {
     private var hold = PhysicalRotaryHold()
     var eligible: () -> Bool = { false }
     var onLongRelease: () -> Void = {}
+    var onShortRelease: () -> Void = {}
+    func cancelGesture() { hold.cancel() }
     var onStatus: (String) -> Void = { _ in }
     private(set) var status = "进入会话后检查旋钮监听。" { didSet { onStatus(status) } }
 
@@ -75,7 +77,7 @@ final class PhysicalRotaryMonitor {
             monitor.status = "VibeKey 监听已断开；重连后重新进入导航。"
         }, Unmanaged.passUnretained(self).toOpaque())
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-        status = "旋钮长按监听已就绪：按住至少 0.65 秒，松开返回会话列表。"
+        status = "旋钮监听已就绪：短按切换编辑／浏览；按住至少 0.65 秒松开返回会话列表。"
         return true
     }
 
@@ -86,8 +88,10 @@ final class PhysicalRotaryMonitor {
         var timebase = mach_timebase_info_data_t()
         mach_timebase_info(&timebase)
         let time = Double(IOHIDValueGetTimeStamp(value)) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
-        if hold.edge(down: IOHIDValueGetIntegerValue(value) != 0, at: time, eligible: eligible()) {
-            onLongRelease()
+        switch hold.action(down: IOHIDValueGetIntegerValue(value) != 0, at: time, eligible: eligible()) {
+        case .long: onLongRelease()
+        case .short: onShortRelease()
+        case nil: break
         }
     }
 
