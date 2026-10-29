@@ -9,6 +9,35 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "native/VibeKit"
 
+# TCC tracks app identity across builds. A silent fallback to ad-hoc signing makes
+# the designated requirement depend on this build's cdhash and loses old grants.
+identity = os.environ.get("VIBEKEY_SIGN_IDENTITY", "").strip()
+allow_adhoc = os.environ.get("VIBEKEY_ALLOW_ADHOC") == "1"
+if not identity or identity == "-":
+    if not allow_adhoc:
+        raise SystemExit(
+            "Stable signing identity required. Set VIBEKEY_SIGN_IDENTITY to an existing "
+            "code-signing identity and retain it for updates. No build or installation attempted. "
+            "For disposable, permission-unstable test bundles only, explicitly set VIBEKEY_ALLOW_ADHOC=1."
+        )
+    identity = "-"
+    print("WARNING: explicit ad-hoc test build; privacy grants may not survive rebuilds.", flush=True)
+else:
+    identities = subprocess.run(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        check=True, capture_output=True, text=True).stdout
+    available = []
+    for line in identities.splitlines():
+        parts = line.strip().split(maxsplit=2)
+        if len(parts) == 3 and len(parts[1]) == 40 and parts[2].startswith('"'):
+            available.append((parts[1], parts[2].strip('"')))
+    matches = [(fingerprint, name) for fingerprint, name in available
+               if identity.upper() == fingerprint.upper() or identity == name]
+    if len(matches) != 1:
+        raise SystemExit("Configured signing identity is missing or ambiguous. No build attempted; no ad-hoc fallback.")
+    # Resolve once to the exact certificate instead of letting codesign choose by substring.
+    identity = matches[0][0]
+
 BUILD_ARGS = ["-c", "release"]
 if os.environ.get("VIBEKEY_BUILD_PATH"):
     BUILD_ARGS += ["--scratch-path", os.environ["VIBEKEY_BUILD_PATH"]]
@@ -40,10 +69,14 @@ info = {
 }
 with (app / "Contents/Info.plist").open("wb") as output:
     plistlib.dump(info, output)
-identity = os.environ.get("VIBEKEY_SIGN_IDENTITY", "-")
 subprocess.run(["codesign", "--force", "--deep", "--sign", identity,
                 "--entitlements", str(ROOT / "scripts/OpenVibeKey.entitlements"), str(app)], check=True)
 subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+if identity != "-":
+    signature = subprocess.run(["codesign", "-dv", str(app)], capture_output=True, text=True, check=True)
+    requirement = subprocess.run(["codesign", "-dr", "-", str(app)], capture_output=True, text=True, check=True)
+    if "Signature=adhoc" in signature.stderr or "designated => cdhash" in requirement.stdout + requirement.stderr:
+        raise SystemExit("Stable signing check failed; do not install this bundle.")
 for flag in ["--resource-self-test", "--modifier-self-test"]:
     subprocess.run([str(macos / "VibeKitApp"), flag], check=True)
 print(f"Packaged only; not installed or launched: {app}")

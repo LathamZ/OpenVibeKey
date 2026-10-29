@@ -72,8 +72,12 @@ To package a Dev app without installing or launching it:
 python3 scripts/package-personal-dev.py
 ```
 
-By default the bundle is ad-hoc signed. For stable local permissions use your own signing
-identity through `VIBEKEY_SIGN_IDENTITY`; no identity or credentials are stored in this repo.
+Packaging now requires an explicit existing signing identity via `VIBEKEY_SIGN_IDENTITY`.
+The identity must resolve unambiguously in the current code-signing keychain; missing/invalid
+configuration fails before building, without silently falling back to ad-hoc. Reuse the same
+identity and bundle identifier for updates. No identity or credentials are stored in this repo.
+Only for disposable test bundles, `VIBEKEY_ALLOW_ADHOC=1` explicitly permits ad-hoc signing;
+those bundles must not be installed as permission-preserving updates.
 The output is `dist/Open VibeKey Dev.app`, bundle ID `com.openvibekey.app.dev`. This script
 neither installs, launches, notarizes nor grants permissions. Quit the running device controller
 normally before manually replacing or launching a build. Signing and real device acceptance
@@ -157,3 +161,19 @@ from the workspace under a generic window title. Hardware routing is unchanged. 
 first-use permission guidance now suppresses automatic re-presentation during this run; the
 explicit permission-check action remains available. Build, resource and 41 modifier checks
 passed; live dismissal acceptance was interrupted by concurrent user changes.
+
+## Signing diagnosis (2026-10-30)
+
+Installed lr.13 and earlier builds used cdhash-only ad-hoc designated requirements, so app
+identity changed between builds. Current tccd logs confirm Accessibility and Input Monitoring
+code-requirement mismatches. Restarting cannot make the new code satisfy an old requirement.
+The packaging guard prevents silent recurrence; no newly signed build is claimed yet.
+
+Before the next update: choose a persistent certificate, make two genuinely different builds,
+compare designated requirements, and verify permission APIs across a normal replacement.
+Moving away from the current ad-hoc identity may require a one-time authorization; stable
+signing does not grant permissions or guarantee every subsystem retains them. Keep signing
+keys private and local; do not add raw logs, identity configuration or certificates to Git.
+
+References: [Apple DTS](https://developer.apple.com/forums/thread/718331),
+[Apple TN2206](https://developer.apple.com/library/archive/technotes/tn2206/_index.html).
