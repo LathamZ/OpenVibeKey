@@ -6,7 +6,7 @@ MIT license and upstream attribution are retained. This is an experimental perso
 not an upstream release. The upstream README describes upstream behavior; this document
 covers the experimental workflow on `feat/codex-workflow`.
 
-Current design: [multi-application workspace](ARCHITECTURE.md), lr.12. A shared interaction
+Current design: [multi-application workspace](ARCHITECTURE.md), lr.15. A shared interaction
 model covers Codex, DeepSeek, Hugging Face, Claude Code and WeChat; only Codex has a runtime
 integration today. Other catalog entries remain explicitly pending.
 Confirmed targets: local DeepSeek Harness, HuggingChat in the browser, and Claude Code
@@ -201,3 +201,14 @@ app-owned PermissionCenter evidence and the matching startup-success PID. A deni
 check is never proof of preservation.
 
 Multiple-project naming and public distribution proposal: [SIGNING.md](SIGNING.md).
+
+## Current generic signing identity (lr.15)
+
+At explicit user request, VibeKey was migrated to the generic personal Software Signing identity.
+The local exact-fingerprint config and generic registry point to it; private keys/certificates are
+not committed. Public certificate bundle and detailed identity are maintained outside the app repo.
+Both built packages embed the expected leaf and pass resource/modifier41/deep/DR checks.
+After one user migration authorization, normal build23→24 update retained both grants in the
+actual app context and the new PID completed navigation. Current installed build is24.
+Old signed app, configuration and identity are retained; no automatic rollback of trust/TCC.
+Receiver-Mac installation and current physical gestures remain separately unverified.

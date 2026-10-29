@@ -1,6 +1,6 @@
-# DESIGN TEMPLATE ONLY. No new certificate/private key has been generated.
-# Proposed public CN must be confirmed before issuance.
-# Proposed validity (5 years) and random serial are issuance parameters, not req config fields.
+# Public issuance profile used for LathamZ Software Signing v1.
+# Existing identity is stored outside Git; normal app updates must reuse it.
+# Validity (1825 days) and random serial were issuance parameters, not req config fields.
 [req]
 prompt = no
 default_bits = 3072
