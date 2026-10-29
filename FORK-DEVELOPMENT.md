@@ -186,8 +186,10 @@ A local self-signed leaf certificate/private key was created with CA:false and c
 The user explicitly approved current-user CodeSigning-only trust. No system-root/TLS trust
 or TCC grants were added. Existing user trust entries were verified unchanged.
 
-First private-key use still requires native Keychain confirmation; computer-use cannot operate
-SecurityAgent. No signed package/update retention is claimed yet. After confirmation, package
-two builds using `VIBEKEY_BUNDLE_BUILD=21` and the normal default22; compare real designated
-requirements and CDHashes, then test permissions from a granted A baseline across actual B
-replacement. A denied-to-denied check is not proof of preservation.
+Native Keychain confirmation was completed by the user and smoke signing succeeded. Two
+lr.14 packages (build21/A, build22/B) were built with different CDHashes but identical
+certificate-based designated requirements; deep validity and cross-requirement checks passed.
+Implementation is unchanged; package build metadata differs. Both passed resource/41 modifier
+checks. A is installed; its initial stable-identity TCC migration is awaiting user completion.
+B remains staged. Actual permission retention across an authorized A→B update is not yet proven;
+a denied-to-denied check is not proof of preservation.
