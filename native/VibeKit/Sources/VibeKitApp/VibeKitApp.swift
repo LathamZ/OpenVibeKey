@@ -21,6 +21,9 @@ struct VibeKitApp: App {
             runWorkspacePreview()
             exit(0)
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--wheel-persistence-check"), index + 1 < CommandLine.arguments.count {
+            exit(runWheelPersistenceCheck(outputPath: CommandLine.arguments[index + 1]))
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--termination-self-test"), index + 1 < CommandLine.arguments.count {
             runTerminationSelfTest(outputPath: CommandLine.arguments[index + 1])
             exit(1)

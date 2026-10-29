@@ -6,7 +6,7 @@ MIT license and upstream attribution are retained. This is an experimental perso
 not an upstream release. The upstream README describes upstream behavior; this document
 covers the experimental workflow on `feat/codex-workflow`.
 
-Current design: [multi-application workspace](ARCHITECTURE.md), lr.15. A shared interaction
+Current design: [multi-application workspace](ARCHITECTURE.md), lr.16. A shared interaction
 model covers Codex, DeepSeek, Hugging Face, Claude Code and WeChat; only Codex has a runtime
 integration today. Other catalog entries remain explicitly pending.
 Confirmed targets: local DeepSeek Harness, HuggingChat in the browser, and Claude Code
@@ -58,7 +58,7 @@ swift run -c release VibeKitThreadListProbe
 swift run -c release VibeKitHostProbe
 ```
 
-The first two probes contain 286 navigation/startup/recovery and 92 focus/hold checks at this
+The first two probes contain 651 navigation/paging/startup/recovery and 92 focus/hold checks at this
 snapshot; thread fixtures contain 28 checks and packaged modifier validation contains 41. Thread-list probes use a local Python fixture, not the real Codex account. The above
 probes do not change hardware settings. Focus/host probes temporarily register and release real
 Carbon hotkeys; run them in a normal desktop session with the device controller quit to avoid
@@ -212,3 +212,34 @@ After one user migration authorization, normal build23→24 update retained both
 actual app context and the new PID completed navigation. Current installed build is24.
 Old signed app, configuration and identity are retained; no automatic rollback of trust/TCC.
 Receiver-Mac installation and current physical gestures remain separately unverified.
+
+
+## lr.16 conversation wheel
+
+The native selector displays eight fixed angular slots per page. Rotate within the current
+page, short-press the dial to request opening the selected conversation, and hold/release
+to return. In the selector only, button 1 selects the previous page, button 2 the next page,
+and button 3 cancels. Paging wraps and preserves angular offset where possible; a partial
+last page clamps to a real conversation. Search and refresh remain available.
+
+Readable horizontal cards show persistent per-conversation color dots. New IDs receive a
+random color from a balanced palette, existing IDs retain theirs across reorder/restart,
+and the context menu or session-management ColorPicker changes that color. The selected
+card has two soft halo layers with a 2.8-second breathing cycle; Reduce Motion uses a static
+halo. Rotation moves the indicator and selection, not the text orientation.
+
+Ordering uses the newer of the server's activity timestamp and the local OS-accepted
+open-request time. OS acceptance does not verify which conversation is visibly displayed.
+A snapshot refresh occurs on selector entry or manual refresh; no live background reorder
+moves a target while the user is rotating. Refresh errors retain the prior snapshot and are
+shown explicitly.
+
+The recovery journal now protects six physical slots and restores both shortcut and fixed
+function banks for buttons 1/2 outside the selector. Version-1 four-slot journals remain
+readable/restorable. While navigation owns these slots, pause/restore before editing their
+hardware configuration. This update reuses the existing developer certificate and bundle ID.
+
+651 navigation/paging/recovery checks, 92 native focus/hold checks, 28 thread-list fixture
+checks, 41 modifier checks and four isolated controller color-persistence checks passed.
+Native full-page, partial-page and empty-state layouts were inspected. Physical page keys,
+rotary feel and live halo appearance remain separate operator acceptance of this first version.

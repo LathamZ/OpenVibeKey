@@ -47,6 +47,14 @@ public struct CodexNavigation {
         if !candidates.isEmpty { selection = min(candidates.count - 1, max(0, selection + delta)) }
         return []
     }
+    public mutating func rotateWheel(_ delta: Int) {
+        guard stage == .choosing else { return }
+        selection = SessionWheelPaging.rotated(selection: selection, count: candidates.count, delta: delta)
+    }
+    public mutating func turnWheelPage(_ delta: Int) {
+        guard stage == .choosing else { return }
+        selection = SessionWheelPaging.turned(selection: selection, count: candidates.count, delta: delta)
+    }
     public mutating func select(id: String) {
         guard stage == .choosing, let i = candidates.firstIndex(where: { $0.id == id }) else { return }
         selection = i
@@ -88,12 +96,14 @@ public struct NavigationCaptureJournal: Codable, Equatable, Sendable {
         public let capture: SentinelComboRecord
         /// Optional so existing v1 recovery journals still decode without migration.
         public let nativeBackspace: Bool?
-        public var programmedTokens: [String] { nativeBackspace == true ? ["Backspace"] : capture.tokens }
+        public let selectorPaging: Bool?
+        public var programmedTokens: [String] { selectorPaging == true ? original : nativeBackspace == true ? ["Backspace"] : capture.tokens }
         public init(id: String, index: UInt8, original: [String], originalFunction: UInt8 = 0, captureKey: String,
-                    nativeBackspace: Bool? = nil) {
+                    nativeBackspace: Bool? = nil, selectorPaging: Bool? = nil) {
             self.id = id; self.index = index; self.original = original; self.originalFunction = originalFunction
             self.capture = SentinelComboRecord(mainKey: captureKey)
             self.nativeBackspace = nativeBackspace
+            self.selectorPaging = selectorPaging
         }
     }
     public struct SentinelComboRecord: Codable, Equatable, Sendable {
@@ -103,12 +113,14 @@ public struct NavigationCaptureJournal: Codable, Equatable, Sendable {
     public let version: Int
     public let deviceSerial: String
     public let slots: [Slot]
-    public init(deviceSerial: String, slots: [Slot]) { version = 1; self.deviceSerial = deviceSerial; self.slots = slots }
+    public init(deviceSerial: String, slots: [Slot]) { version = slots.count == 6 ? 2 : 1; self.deviceSerial = deviceSerial; self.slots = slots }
     public var isValid: Bool {
-        version == 1 && !deviceSerial.isEmpty && deviceSerial != "—" &&
-        Set(slots.map(\.id)) == Set(["dialP", "dialL", "dialR", "btn3"]) && slots.count == 4 &&
-        Set(slots.map(\.index)).count == 4 && slots.allSatisfy { $0.index < 10 && SentinelPool.mainKeys.contains($0.capture.mainKey) } &&
-        Set(slots.map { $0.capture.mainKey }).count == 4 &&
+        let legacy = version == 1 && slots.count == 4 && Set(slots.map(\.id)) == Set(["dialP", "dialL", "dialR", "btn3"]) && !slots.contains { $0.selectorPaging == true }
+        let wheel = version == 2 && slots.count == 6 && Set(slots.map(\.id)) == Set(["dialP", "dialL", "dialR", "btn3", "btn1", "btn2"]) && Set(slots.filter { $0.selectorPaging == true }.map(\.id)) == Set(["btn1", "btn2"])
+        return (legacy || wheel) && !deviceSerial.isEmpty && deviceSerial != "—" &&
+        Set(slots.map(\.index)).count == slots.count && slots.allSatisfy { $0.index < 10 && SentinelPool.mainKeys.contains($0.capture.mainKey) } &&
+        Set(slots.map { $0.capture.mainKey }).count == slots.count &&
         slots.allSatisfy { $0.nativeBackspace != true || $0.id == "btn3" }
+
     }
 }

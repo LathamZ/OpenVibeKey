@@ -50,7 +50,7 @@ public enum WorkflowDefaults {
     public static let automaticNavigation = true
     public static let nativeFocus = true
     public static let browsingPages = true
-    public static let ownedSlots: Set<String> = ["dialL", "dialR", "dialP", "btn3"]
+    public static let ownedSlots: Set<String> = ["dialL", "dialR", "dialP", "btn3", "btn1", "btn2"]
     public static func canEdit(slot: String, navigationOwnsHardware: Bool) -> Bool {
         !navigationOwnsHardware || !ownedSlots.contains(slot)
     }

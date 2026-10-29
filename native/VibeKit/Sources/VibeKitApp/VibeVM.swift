@@ -256,7 +256,8 @@ final class VibeVM: ObservableObject {
     private let physicalRotaryMonitor = PhysicalRotaryMonitor()
     private var nativePageRoute = NativePageRouteState()
     private let navigationRecoveryKey = "codexNavigation.recovery.v1"
-    private let navigationCaptureIDs: Set<String> = Set(["dialP", "dialL", "dialR", "btn3"].map { "navigation." + $0 })
+    private var wheelPagePress = WheelPagePress()
+    private let navigationCaptureIDs: Set<String> = Set(["dialP", "dialL", "dialR", "btn3", "btn1", "btn2"].map { "navigation." + $0 })
     @Published private(set) var dialPermissionPending = VibeVM.migratedDefaults.bool(forKey: "dialDoubleClick.pendingEnable")
     @Published private(set) var dialPermissionRestartRequired = false
     private var dialPermissionFlow = DialPermissionFlow()
@@ -1809,12 +1810,13 @@ extension VibeVM {
     private func cancelNavigationGestures() {
         navigationTimer?.invalidate(); navigationTimer = nil
         navigationDial.cancel(); navigationExit.cancel()
+        selectorExitPress.cancel(); wheelPagePress.cancel()
         // Rotation down/up barriers are kept until release across a context change.
     }
     private func resetNavigationGestures() {
         navigationTimer?.invalidate(); navigationTimer = nil
         navigationDial.reset(); navigationExit.reset(); navigationRotationHeld.removeAll()
-        selectorExitPress.reset()
+        selectorExitPress.reset(); wheelPagePress.reset()
         selectorExitGeneration = nil
     }
     private func registerNavigationKey(slot: String, combo: SentinelCombo) -> Bool {
@@ -1861,6 +1863,10 @@ extension VibeVM {
     }
     private func navigationPressed(_ slot: String) {
         guard codexWorkflow.ready, !codexWorkflow.busy, !codexWorkflow.pageRoutingBusy, connected, !quitting else { return }
+        if slot == "btn1" || slot == "btn2" {
+            if codexWorkflow.navigation.stage == .choosing { wheelPagePress.press(slot, generation: codexWorkflow.selectorGeneration) }
+            return
+        }
         if slot == "btn3", codexWorkflow.navigation.stage == .choosing {
             if !selectorExitPress.isHeld { selectorExitGeneration = codexWorkflow.selectorGeneration }
             selectorExitPress.press(); return
@@ -1875,6 +1881,12 @@ extension VibeVM {
         scheduleNavigationDeadline()
     }
     private func navigationReleased(_ slot: String) {
+        if slot == "btn1" || slot == "btn2" {
+            let eligible = codexWorkflow.ready && !codexWorkflow.busy && !codexWorkflow.pageRoutingBusy && connected && !quitting && codexWorkflow.navigation.stage == .choosing
+            if let delta = wheelPagePress.release(slot, generation: codexWorkflow.selectorGeneration, eligible: eligible) { codexWorkflow.turnWheelPage(delta) }
+            codexWorkflow.refreshPhysicalFocusRoute()
+            return
+        }
         if slot == "btn3", selectorExitPress.isHeld {
             let close = selectorExitPress.release()
             let sameSelector = selectorExitGeneration == codexWorkflow.selectorGeneration
@@ -1928,9 +1940,9 @@ extension VibeVM {
               !quitting, connected, slotsHydrated, let device = dev else {
             codexWorkflow.message = "请等待设备配置完成；存在恢复记录时请先恢复。"; return
         }
-        let ids = ["dialP", "dialL", "dialR", "btn3"]
+        let ids = ["dialP", "dialL", "dialR", "btn3", "btn1", "btn2"]
         let indices = ids.compactMap { slotIndex($0) }
-        guard indices.count == 4, Set(indices).count == 4, indices.allSatisfy({ $0 < 10 }) else {
+        guard indices.count == 6, Set(indices).count == 6, indices.allSatisfy({ $0 < 10 }) else {
             codexWorkflow.message = "旋钮标定与按钮槽位重叠，无法安全启用导航。"; return
         }
         var used = loadProfiles().values.flatMap { $0.buttons + $0.dial }
@@ -1975,7 +1987,8 @@ extension VibeVM {
                 }
                 records.append(.init(id: slot, index: indices[i], original: tokens,
                                      originalFunction: function, captureKey: captureList[i].mainKey,
-                                     nativeBackspace: slot == "btn3" ? true : nil))
+                                     nativeBackspace: slot == "btn3" ? true : nil,
+                                     selectorPaging: slot == "btn1" || slot == "btn2" ? true : nil))
             }
             let journal = NavigationCaptureJournal(deviceSerial: serial ?? "", slots: records)
             DispatchQueue.main.async {
@@ -1996,7 +2009,10 @@ extension VibeVM {
                 self.navigationJournal = journal
                 self.io.async {
                     let outcome = NavigationCaptureTransaction.install(slots: journal.slots,
-                        capture: { slot in (try? Self.writeDial(DialRestore(index: slot.index, tokens: slot.programmedTokens), to: device)) == true },
+                        capture: { slot in
+                            if slot.selectorPaging == true { return Self.restoreNavigationSlot(slot, device: device) }
+                            return (try? Self.writeDial(DialRestore(index: slot.index, tokens: slot.programmedTokens), to: device)) == true
+                        },
                         restore: { Self.restoreNavigationSlot($0, device: device) })
                     DispatchQueue.main.async {
                         guard self.navigationOperation == operation, !self.quitting else { return }
@@ -2129,7 +2145,7 @@ extension VibeVM {
     }
     private func syncNativePageRoute(_ wantedContent: Bool) {
         guard navigationJournal != nil, codexWorkflow.ready, connected, !quitting, !codexWorkflow.busy else { return }
-        guard !selectorExitPress.isHeld else { return }
+        guard !selectorExitPress.isHeld, !wheelPagePress.isHeld else { return }
         let mode = NativePageScroll.desired(enabled: codexWorkflow.nativePageScrollEnabled,
             ready: true, contentSelected: wantedContent && codexWorkflow.navigation.stage == .openRequested &&
                 !navigationDial.isHeld && navigationRotationHeld.isEmpty,
@@ -2170,6 +2186,7 @@ extension VibeVM {
         let generation = navigationOperation
         io.async {
             let ok = device.getSN() == journal.deviceSerial && NativePageScroll.apply(slots: journal.slots, mode: mode,
+                restoreOriginal: { Self.restoreNavigationSlot($0, device: device) },
                 writeAndVerify: { slot, tokens in
                     (try? Self.writeDial(DialRestore(index: slot.index, tokens: tokens), to: device)) == true
                 })

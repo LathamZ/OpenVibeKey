@@ -38,7 +38,7 @@ struct ContentView: View {
                 if !vm.connected { offlineAppBindingsCard }
                 if vm.connected {
                     if vm.navigationOwnsHardware {
-                        Label("旋钮与底部键正用于导航；其他按键、灯光和声音仍可调整。", systemImage: "info.circle")
+                        Label("工作流管理旋钮和三键；按钮1／2在转盘中翻页。暂停后可改键位，灯光和声音仍可调整。", systemImage: "info.circle")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     HStack(alignment: .top, spacing: 16) {
@@ -277,7 +277,7 @@ struct ContentView: View {
                 if vm.navigationOwnsHardware {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("由工作流管理", systemImage: "dial.medium").font(.headline)
-                        Text("旋钮：左右移动、编辑／浏览与会话选择。\n底部键：退格、按住连删；列表中取消。")
+                        Text("旋钮：左右移动、编辑／浏览与会话选择。\n按钮1／2：转盘上一页／下一页，其他时间恢复原键位。\n底部键：退格、按住连删；列表中取消。")
                             .font(.callout).foregroundStyle(.secondary)
                     }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.accentColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))

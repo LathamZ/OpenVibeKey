@@ -8,6 +8,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     @Published private(set) var pinnedSessions: [CodexSession]
     @Published private(set) var recentThreads: [CodexThreadSummary] = []
     @Published private(set) var refreshing = false
+    @Published private(set) var refreshError: String?
     @Published private(set) var selectorLoading = false
     @Published var selectorQuery = ""
     @Published var listStatus = "打开选择面板时会自动读取本机未归档会话。"
@@ -18,6 +19,46 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     var filteredSessions: [CodexSession] { CodexSessionCatalog.filter(sessions, query: selectorQuery, projects: projectNames) }
     func isPinned(_ id: String) -> Bool { pinnedSessions.contains { $0.id == id } }
     func project(_ id: String) -> String { projectNames[id] ?? "固定会话" }
+    @Published private(set) var colorLedger = SessionColorLedger()
+    private var localOpened: [String: Double] = [:]
+    private let colorKey = "sessionWheel.colors.v1"
+    private let openedKey = "sessionWheel.opened.v1"
+    var wheelPanelSize: CGSize {
+        let frame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 1000)
+        return CGSize(width: min(900, max(760, frame.width - 60)), height: min(790, max(640, frame.height - 70)))
+    }
+    var wheelPage: Int { SessionWheelPaging.page(selection: navigation.selection, count: navigation.candidates.count) }
+    var wheelPageCount: Int { SessionWheelPaging.pageCount(navigation.candidates.count) }
+    var wheelRange: Range<Int> { SessionWheelPaging.range(selection: navigation.selection, count: navigation.candidates.count) }
+    var wheelSessions: [CodexSession] {
+        SessionWheelPaging.ordered(filteredSessions, activity: Dictionary(recentThreads.map { ($0.session.id, Double($0.updatedAt)) }, uniquingKeysWith: max), opened: localOpened)
+    }
+    func colorHex(_ id: String) -> String { colorLedger.colors[id] ?? SessionColorLedger.palette[0] }
+    func setColor(id: String, hex: String) {
+        guard sessions.contains(where: { $0.id == id }), colorLedger.set(id: id, hex: hex) else { return }
+        persistColors()
+    }
+    private func persistColors() {
+        guard !preview, let data = try? JSONEncoder().encode(colorLedger) else { return }
+        defaults.set(data, forKey: colorKey)
+    }
+    private func ensureColors() {
+        let changed: Bool
+        if preview { changed = colorLedger.ensure(ids: sessions.map(\.id), pick: { _ in 0 }) }
+        else { changed = colorLedger.ensure(ids: sessions.map(\.id)) }
+        if changed { persistColors() }
+    }
+    private func enterWheel(preferredID: String? = nil) {
+        ensureColors()
+        let ordered = wheelSessions
+        navigation.enter(sessions: ordered, preferredID: preferredID ?? ordered.first?.id)
+    }
+    func turnWheelPage(_ delta: Int) {
+        guard (ready || preview), navigation.stage == .choosing, !selectorLoading, !pageRoutingBusy else { return }
+        let previous = navigation.selection
+        navigation.turnWheelPage(delta)
+        if previous != navigation.selection { selectorGeneration = UUID(); cancelPendingGestures?() }
+    }
     @Published var message = "导航模式未启用。"
     @Published var ready = false
     @Published var busy = false
@@ -69,13 +110,15 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         nativeFocusMainKey = WorkflowDefaults.focusMainKey
         nativeFocusConfigured = WorkflowDefaults.nativeFocus
         nativePageScrollEnabled = WorkflowDefaults.browsingPages
+        if !preview, let data = defaults.data(forKey: colorKey), let saved = try? JSONDecoder().decode(SessionColorLedger.self, from: data) { colorLedger = SessionColorLedger(colors: saved.colors) }
+        if !preview, let data = defaults.data(forKey: openedKey), let saved = try? JSONDecoder().decode([String: Double].self, from: data) { localOpened = saved.filter { $0.value.isFinite && $0.value >= 0 } }
         super.init()
         if preview, CommandLine.arguments.contains("--preview-many-sessions") {
-            recentThreads = (1...9).map { i in
+            recentThreads = (1...19).map { i in
                 let id = String(format: "00000000-0000-0000-0000-%012d", i)
-                return CodexThreadSummary(session: CodexSession(reference: id, title: "示例开发会话 \(i)")!, project: "示例项目", updatedAt: Int64(10-i))
+                return CodexThreadSummary(session: CodexSession(reference: id, title: ["设计新的输入工作流", "Review 界面改动", "调试会话导航", "准备软件发布", "整理项目 Wiki", "优化语音输入", "构建本地开发工具", "检查自动化结果"][((i - 1) % 8)] + " · \(i)")!, project: "示例项目", updatedAt: Int64(30-i))
             }
-            listStatus = "预览：9 条示例会话；不读取或打开 Codex。"
+            listStatus = "预览：19 条示例会话；不读取或打开 Codex。"
         }
         observer = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main) { [weak self] note in
@@ -127,7 +170,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         guard let session = CodexSession(reference: reference, title: title), !pinnedSessions.contains(where: { $0.id == session.id }) else {
             message = "请输入有效且未重复的 Codex 会话 ID 或现有会话深链，以及不超过 100 字的名称。"; return false
         }
-        pinnedSessions.append(session); persist(); return true
+        pinnedSessions.append(session); ensureColors(); persist(); return true
     }
     func removeSession(id: String) {
         guard navigation.stage != .choosing, navigation.stage != .opening else { return }
@@ -151,12 +194,12 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         let selection = navigation.selected?.id
         cancelRefresh()
         let generation = UUID(); refreshGeneration = generation
-        refreshing = true; selectorLoading = replaceSelector
+        refreshing = true; selectorLoading = replaceSelector; refreshError = nil
         if replaceSelector { cancelPendingGestures?() }
         listStatus = "正在读取本机未归档会话…"
         guard let executable = codexNavigationCLIURL() else {
             refreshing = false; selectorLoading = false
-            listStatus = "未找到 Codex 命令行组件；当前仅显示固定会话。"; return
+            listStatus = "未找到 Codex 命令行组件；当前仅显示固定会话。"; refreshError = listStatus; return
         }
         let task = Task.detached(priority: .userInitiated) {
             try CodexThreadListClient(executable: executable).fetch(cancelled: { Task.isCancelled })
@@ -169,28 +212,30 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
             switch result {
             case .success(let listing):
                 self.recentThreads = listing.threads
-                self.listStatus = "已读取 \(listing.threads.count) 条本机未归档会话" + (listing.hasMore ? "（仅显示最近 2000 条）" : "") + "。VibeKey 固定会话保留在最前面。"
+                self.ensureColors()
+                self.listStatus = "已读取 \(listing.threads.count) 条本机未归档会话" + (listing.hasMore ? "（仅显示最近 2000 条）" : "") + "。转盘按最近使用排序。"
                 if replaceSelector, self.navigation.stage == .choosing {
                     self.cancelPendingGestures?()
-                    self.navigation.enter(sessions: self.filteredSessions, preferredID: selection)
+                    self.enterWheel(preferredID: selection)
                 }
             case .failure(let error):
                 self.listStatus = error.localizedDescription + (self.recentThreads.isEmpty ? " 当前仅显示固定会话。" : " 已保留上次读取的列表。")
+                self.refreshError = self.listStatus
             }
         }
     }
     func applySelectorQuery() {
         guard navigation.stage == .choosing, !selectorLoading else { return }
         cancelPendingGestures?()
-        navigation.enter(sessions: filteredSessions, preferredID: navigation.selected?.id)
+        enterWheel(preferredID: navigation.selected?.id)
     }
     func enter() {
         guard ready || preview else { message = "请先连接设备并启用导航模式。"; return }
         selectorGeneration = UUID()
-        cancelPendingGestures?(); selectorQuery = ""; navigation.enter(sessions: sessions)
+        cancelPendingGestures?(); selectorQuery = ""; enterWheel()
         captureRotaryForNavigation()
         guard ready || preview else { return }
-        message = "键位就绪后转动选择，单击打开；底部键按下并松开关闭列表。内容层底部键仍是退格。"
+        message = "转动在当前盘选择，旋钮短按打开；按钮1／2换盘，第三键取消。"
         present()
         refreshSessions(replaceSelector: true)
     }
@@ -216,7 +261,8 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
     func rotate(_ delta: Int) {
         guard (ready || preview), !selectorLoading, !pageRoutingBusy else { return }
-        execute(navigation.rotate(delta))
+        if navigation.stage == .choosing { navigation.rotateWheel(delta) }
+        else { execute(navigation.rotate(delta)) }
     }
     func choose(_ id: String) { if !selectorLoading { navigation.select(id: id) } }
     func suspend(message: String) {
@@ -256,6 +302,8 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 guard let self, self.navigation.requestID == request else { return }
                 self.navigation.dispatched(request: request, session: session, accepted: error == nil)
                 if error == nil {
+                    self.localOpened[session.id] = Date().timeIntervalSince1970
+                    if let data = try? JSONEncoder().encode(self.localOpened) { self.defaults.set(data, forKey: self.openedKey) }
                     self.rotaryEditing = false
                     self.refreshPhysicalFocusRoute()
                     self.message = self.nativeFocusConfigured
@@ -285,12 +333,12 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
     private func present() {
         if panel == nil {
-            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 470, height: 480),
+            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: wheelPanelSize.width, height: wheelPanelSize.height),
                                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            panel.title = "Codex · 选择会话"
+            panel.title = "选择会话"
             panel.isReleasedWhenClosed = false; panel.level = .floating; panel.hidesOnDeactivate = false
             panel.delegate = self
-            panel.contentView = NSHostingView(rootView: CodexSessionSelector(controller: self))
+            panel.contentView = NSHostingView(rootView: SessionWheelView(controller: self))
             panel.center(); self.panel = panel
         }
         // This is our own window. Keep native Backspace in the visible selector,
@@ -319,59 +367,6 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
 }
 
-private struct CodexSessionSelector: View {
-    @ObservedObject var controller: CodexWorkflowController
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Codex 会话导航").font(.title3.bold())
-            HStack {
-                TextField("搜索会话名称、项目或 ID", text: $controller.selectorQuery)
-                    .onChange(of: controller.selectorQuery) { _ in controller.applySelectorQuery() }
-                Button("刷新") { controller.refreshSessions(replaceSelector: true) }.disabled(controller.refreshing)
-            }
-            HStack(spacing: 8) {
-                if controller.refreshing { ProgressView().controlSize(.small) }
-                Text(controller.listStatus).font(.caption).foregroundStyle(.secondary)
-            }
-            Text(controller.pageRoutingBusy ? "正在切换列表键位，请稍候…" : controller.selectorLoading ? "正在准备会话列表…" : "转动选择，单击打开；底部键按下并松开关闭列表。共 \(controller.navigation.candidates.count) 个候选。")
-                .font(.callout).foregroundStyle(.secondary)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(controller.selectorLoading ? [] : controller.navigation.candidates) { session in
-                            Button { controller.choose(session.id) } label: {
-                                HStack {
-                                    Image(systemName: controller.navigation.selected?.id == session.id ? "arrowtriangle.right.fill" : "circle")
-                                    VStack(alignment: .leading) {
-                                        Text(session.title).font(.body.weight(.medium)).lineLimit(1)
-                                        Text(controller.project(session.id) + " · " + String(session.id.suffix(8)))
-                                            .font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    if controller.isPinned(session.id) {
-                                        Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(controller.navigation.selected?.id == session.id ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.06),
-                                            in: RoundedRectangle(cornerRadius: 8))
-                            }.buttonStyle(.plain).id(session.id).disabled(controller.selectorLoading || controller.pageRoutingBusy)
-                        }
-                    }
-                }
-                .opacity(controller.selectorLoading ? 0.45 : 1)
-                .onChange(of: controller.navigation.selected?.id) { id in if let id { proxy.scrollTo(id) } }
-            }
-            Text(controller.message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("关闭") { controller.dismissSelector() }
-                Spacer()
-                Button("请求打开会话") { controller.gesture(.single, control: .dial) }
-                    .disabled(controller.pageRoutingBusy)
-                    .disabled(controller.navigation.selected == nil || controller.selectorLoading)
-            }
-        }.padding(18).frame(width: 470, height: 480).background(Color(nsColor: .windowBackgroundColor))
-    }
-}
 
 struct CodexNavigationSettings: View {
     @ObservedObject var vm: VibeVM
@@ -408,6 +403,11 @@ struct CodexNavigationSettings: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
+                            ColorPicker("会话颜色", selection: Binding(get: { Color(wheelHex: controller.colorHex(session.id)) }, set: { value in
+                                guard let rgb = NSColor(value).usingColorSpace(.sRGB) else { return }
+                                let hex = String(format: "%02X%02X%02X", Int((rgb.redComponent * 255).rounded()), Int((rgb.greenComponent * 255).rounded()), Int((rgb.blueComponent * 255).rounded()))
+                                controller.setColor(id: session.id, hex: hex)
+                            }), supportsOpacity: false).labelsHidden().help("自定义这个会话的颜色")
                             if controller.isPinned(session.id) {
                                 Button("取消固定") { controller.removeSession(id: session.id) }
                                     .disabled(controller.navigation.stage == .choosing || controller.navigation.stage == .opening)
@@ -439,6 +439,9 @@ func runCodexNavigationPreview() {
     app.setActivationPolicy(.regular)
     let controller = CodexWorkflowController(defaults: UserDefaults(suiteName: "com.openvibekey.navigation-preview")!, preview: true)
     controller.enter()
+    if let i = CommandLine.arguments.firstIndex(of: "--preview-wheel-page"), i + 1 < CommandLine.arguments.count,
+       let page = Int(CommandLine.arguments[i + 1]) { controller.turnWheelPage(page) }
+    if CommandLine.arguments.contains("--preview-empty-wheel") { controller.selectorQuery = "no-fixture-matches"; controller.applySelectorQuery() }
     app.activate(ignoringOtherApps: true)
     print("NAVIGATION_PREVIEW_READY no_hardware_writes=true codex_control=false")
     fflush(stdout)

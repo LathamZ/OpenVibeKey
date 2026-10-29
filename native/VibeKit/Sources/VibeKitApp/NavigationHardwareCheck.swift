@@ -34,7 +34,7 @@ private final class NavigationHardwareCheck {
                 guard !HotKeyCenter.shared.isRegistered("navigation.btn3") else {
                     finish(success: false, reason: "native backspace must not have a global hotkey capture"); return
                 }
-                rows.append(["stage": "capture_readback_verified", "slots": ["dialP", "dialL", "dialR", "btn3"],
+                rows.append(["stage": "capture_readback_verified", "slots": ["dialP", "dialL", "dialR", "btn3", "btn1", "btn2"],
                              "native_focus_capture_key": vm.codexWorkflow.preferredFocusCaptureKey ?? "disabled",
                              "bottom_programmed_tokens": ["Backspace"], "bottom_fixed_function": 0,
                              "bottom_global_hotkey_registered": HotKeyCenter.shared.isRegistered("navigation.btn3")] )
@@ -54,7 +54,7 @@ private final class NavigationHardwareCheck {
                             guard HotKeyCenter.shared.isRegistered("navigation.btn3") else {
                                 self.finish(success: false, reason: "selector exit capture missing"); return
                             }
-                            self.rows.append(["stage": "selector_rotation_and_exit_capture_readback_verified"])
+                            self.rows.append(["stage": "selector_rotation_exit_and_two_paging_buttons_readback_verified"])
                             self.vm.checkNativePageHardware(.navigation) { [weak self] restored in
                                 guard let self else { return }
                                 guard restored, !HotKeyCenter.shared.isRegistered("navigation.btn3") else {
@@ -91,7 +91,7 @@ private final class NavigationHardwareCheck {
         let result: [String: Any] = ["success": success, "reason": reason, "events": rows,
             "elapsed_seconds": ProcessInfo.processInfo.systemUptime - started,
             "physical_gestures_tested": false, "target_app_control": false,
-            "scope": "AU05 current config: temporary four-slot capture, verified restoration and normal quit recovery"]
+            "scope": "AU05 current config: temporary six-slot capture and selector paging restoration, verified restoration and normal quit recovery"]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: outputPath))
         }

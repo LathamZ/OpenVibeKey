@@ -292,7 +292,7 @@ do {
   check("navigation depends only on required permissions", WorkflowDefaults.navigationPermissionsReady(accessibility:accessibility,inputMonitoring:monitor) == (accessibility && monitor))
  }}}}
  for id in ["btn1","btn2","btn3","dialP","dialL","dialR"] {
-  check("owned slots alone are protected",WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:true) == ["btn1","btn2"].contains(id))
+  check("owned slots alone are protected",!WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:true))
   check("paused navigation permits manual key editing",WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:false))
  }
  check("catalog has five distinct applications",WorkflowCatalog.targets.count == 5 && Set(WorkflowCatalog.targets.map(\.id)).count == 5)
@@ -303,6 +303,105 @@ do {
  }
  check("WeChat has no invented task-stop capability",!WorkflowCatalog.supports(.stopTask,in:.weChat))
  check("Codex resume is not falsely advertised",!WorkflowCatalog.supports(.resumeTask,in:.codex))
+}
+
+// Eight-position wheel and safe page-key leases.
+do {
+    for count in [0, 1, 7, 8, 9, 16, 17, 2000] {
+        check("disc count covers every item", SessionWheelPaging.pageCount(count) == (count == 0 ? 0 : (count - 1) / 8 + 1))
+        for selected in count == 0 ? [0] : Array(Set([0, count / 2, count - 1])) {
+            let range = SessionWheelPaging.range(selection: selected, count: count)
+            check("disc contains at most eight real items", range.count <= 8 && range.lowerBound >= 0 && range.upperBound <= count)
+            for delta in [-1001, -1, 0, 1, 1001, Int.min, Int.max] {
+                let rotated = SessionWheelPaging.rotated(selection: selected, count: count, delta: delta)
+                let turned = SessionWheelPaging.turned(selection: selected, count: count, delta: delta)
+                check("rotation stays on disc", count == 0 ? rotated == 0 : range.contains(rotated))
+                check("paging never selects an empty slot", count == 0 ? turned == 0 : (0..<count).contains(turned))
+            }
+        }
+    }
+    check("clockwise last slot wraps on same disc", SessionWheelPaging.rotated(selection: 7, count: 19, delta: 1) == 0)
+    check("anticlockwise first slot wraps on same disc", SessionWheelPaging.rotated(selection: 8, count: 19, delta: -1) == 15)
+    check("partial disc wraps among three", SessionWheelPaging.rotated(selection: 18, count: 19, delta: 1) == 16)
+    check("page keeps angular slot", SessionWheelPaging.turned(selection: 6, count: 19, delta: 1) == 14)
+    check("last page clamps absent angular slot", SessionWheelPaging.turned(selection: 14, count: 19, delta: 1) == 18)
+    check("previous page from first wraps", SessionWheelPaging.turned(selection: 0, count: 19, delta: -1) == 16)
+    var nav = CodexNavigation(); nav.enter(sessions: (1...19).map(session)); nav.rotateWheel(-1)
+    check("wheel navigation uses page-local wrapping", nav.selection == 7)
+    nav.turnWheelPage(1); check("wheel pager selects real global session", nav.selection == 15 && nav.selected == session(16))
+    _ = nav.gesture(.single, control: .dial, sessions: [])
+    check("confirm opens actual highlighted ID", nav.selected == session(16) && nav.stage == .opening)
+    nav.turnWheelPage(1); nav.rotateWheel(1)
+    check("opening stage cannot change target with page keys", nav.selection == 15)
+}
+do {
+    let items = [session(1), session(2), session(3)]
+    let sorted = SessionWheelPaging.ordered(items, activity: [items[0].id: 100, items[1].id: 200, items[2].id: 150], opened: [items[0].id: 300])
+    check("local opening and server activity share recency order", sorted == [items[0], items[1], items[2]])
+    check("server millisecond timestamps normalized", SessionWheelPaging.ordered(items, activity: [items[0].id: 1_800_000_000_000, items[1].id: 1_900_000_000], opened: [:]).first == items[1])
+    check("unknown timestamps have deterministic tie order", SessionWheelPaging.ordered(items.reversed(), activity: [:], opened: [:]) == items)
+    check("bad timestamps cannot win recency", SessionWheelPaging.ordered(items, activity: [items[2].id: .nan], opened: [items[2].id: -.infinity]).first == items[0])
+    var ledger = SessionColorLedger(colors: ["bad":"GG0000", "saved":"abcdef"])
+    check("invalid saved color rejected", ledger.colors["bad"] == nil && ledger.colors["saved"] == "ABCDEF")
+    let ids = (1...19).map { session($0).id }
+    check("new sessions assigned palette colors", ledger.ensure(ids: ids, pick: { _ in 0 }))
+    check("initial disc has eight distinguishable colors", Set(ids.prefix(8).compactMap { ledger.colors[$0] }).count == 8)
+    let saved = ledger
+    check("refresh never rerandomizes existing colors", !ledger.ensure(ids: ids.reversed(), pick: { _ in 0 }) && ledger == saved)
+    check("custom color accepted", ledger.set(id: ids[0], hex: "112233"))
+    _ = ledger.ensure(ids: ids + [session(20).id])
+    check("new conversations preserve manual colors", ledger.colors[ids[0]] == "112233")
+    check("invalid custom color does not erase saved value", !ledger.set(id: ids[0], hex: "white") && ledger.colors[ids[0]] == "112233")
+    let data = try! JSONEncoder().encode(ledger)
+    check("color ledger survives restart", (try! JSONDecoder().decode(SessionColorLedger.self, from: data)) == ledger)
+}
+do {
+    var key = WheelPagePress(); let epoch = UUID()
+    check("unmatched page release ignored", key.release("btn1", generation: epoch, eligible: true) == nil)
+    key.press("btn1", generation: epoch); key.press("btn1", generation: epoch)
+    check("hold and repeat emit one page on release", key.release("btn1", generation: epoch, eligible: true) == -1)
+    check("duplicate page up silent", key.release("btn1", generation: epoch, eligible: true) == nil)
+    key.press("btn2", generation: epoch); key.cancel(); key.press("btn2", generation: epoch)
+    check("cancelled held key retains barrier", key.isHeld && key.release("btn2", generation: epoch, eligible: true) == nil)
+    key.press("btn2", generation: epoch)
+    check("new physical press works after cancelled release", key.release("btn2", generation: epoch, eligible: true) == 1)
+    key.press("btn1", generation: epoch)
+    check("old selector generation cannot page new selector", key.release("btn1", generation: UUID(), eligible: true) == nil)
+    key.press("btn2", generation: epoch)
+    check("background release cannot page", key.release("btn2", generation: epoch, eligible: false) == nil)
+}
+do {
+    let ids = ["dialP", "dialL", "dialR", "btn3", "btn1", "btn2"]
+    let entries = ids.enumerated().map { i,id in
+        NavigationCaptureJournal.Slot(id: id, index: UInt8(i), original: ["A"], originalFunction: id == "btn1" ? 12 : 0, captureKey: SentinelPool.mainKeys[i], nativeBackspace: id == "btn3" ? true : nil, selectorPaging: id == "btn1" || id == "btn2" ? true : nil)
+    }
+    let wheel = NavigationCaptureJournal(deviceSerial: "fixture", slots: entries)
+    check("new journal is valid version2", wheel.version == 2 && wheel.isValid)
+    let legacy = NavigationCaptureJournal(deviceSerial: "fixture", slots: Array(entries.prefix(4)))
+    check("old four-slot journal still valid", legacy.version == 1 && legacy.isValid)
+    check("partial paging pair rejected", !NavigationCaptureJournal(deviceSerial: "fixture", slots: Array(entries.prefix(5))).isValid)
+    check("journal decoding retains selector-only fields", (try! JSONDecoder().decode(NavigationCaptureJournal.self, from: JSONEncoder().encode(wheel))) == wheel)
+    for mode in [NativePageScroll.Mode.navigation, .arrows, .pages, .selection] {
+        var captured = Set<String>(), restored = Set<String>()
+        let ok = NativePageScroll.apply(slots: entries, mode: mode, restoreOriginal: { slot in
+            check("paging restores original function bank", slot.id != "btn1" || slot.originalFunction == 12)
+            restored.insert(slot.id); return true
+        }, writeAndVerify: { slot,tokens in
+            if slot.selectorPaging == true { captured.insert(slot.id); check("selector writes exact paging capture", tokens == slot.capture.tokens) }
+            return true
+        })
+        check("routing mode succeeds", ok)
+        check("page buttons captured only in selector", mode == .selection ? captured == Set(["btn1","btn2"]) && restored.isEmpty : captured.isEmpty && restored == Set(["btn1","btn2"]))
+    }
+    var restored = Set<String>()
+    let ok = NativePageScroll.apply(slots: entries, mode: .selection, restoreOriginal: { restored.insert($0.id); return true }, writeAndVerify: { slot,_ in slot.id != "btn2" })
+    check("failed selector write reports failure", !ok)
+    check("failed write restores both original paging banks", restored == Set(["btn1","btn2"]))
+    for failure in entries.indices {
+        var writes = 0, restored = Set<String>()
+        let result = NavigationCaptureTransaction.install(slots: entries, capture: { _ in defer { writes += 1 }; return writes != failure }, restore: { restored.insert($0.id); return true })
+        check("every six-slot install failure rolls back every original", result == .rolledBack && restored == Set(ids))
+    }
 }
 
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
