@@ -9,6 +9,8 @@ covers the experimental workflow on `feat/codex-workflow`.
 Current design: [multi-application workspace](ARCHITECTURE.md), lr.12. A shared interaction
 model covers Codex, DeepSeek, Hugging Face, Claude Code and WeChat; only Codex has a runtime
 integration today. Other catalog entries remain explicitly pending.
+Confirmed targets: local DeepSeek Harness, HuggingChat in the browser, and Claude Code
+in Herdr/a terminal. These are distinct context identities, not interchangeable model APIs.
 
 ## Baseline and scope
 

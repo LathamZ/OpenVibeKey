@@ -64,12 +64,14 @@ flowchart LR
 
 ## 各应用接入路径
 
-| 应用 | 首个候选入口 | 必须先验证 | 本轮状态 |
+用户于 2026-10-29 确认：DeepSeek 指本机 DeepSeek Harness；Hugging Face 指 HuggingChat 网页；Claude Code 指 Herdr／终端中的会话。以下入口已确定，接口能力仍须逐项验证。
+
+| 应用 | 已确认入口 | 必须先验证 | 本轮状态 |
 |---|---|---|---|
 | Codex | 独立官方 app-server 的 thread/list、官方已有会话深链、用户原生聚焦快捷键 | 正文焦点、真实长短按完整链路、前台会话变化 | 原有链路沿用；真实键位读回通过，完整体验待验收 |
-| DeepSeek | 本机 DeepSeek Harness（候选）；若用户使用网页则另建浏览器适配器 | CLI／深链具体操作契约、会话范围、输入焦点 | 发现本机应用与 dsh URI；URI存在不等于已验证会话跳转 |
-| Hugging Face | 暂按 HuggingChat 网页；也可能是某个 Space，待确认 | 具体域名与标签页、登录态、页面结构、会话及输入定位 | 规划；未读取用户网页或登录数据 |
-| Claude Code | 当前终端／Herdr 中的具体 CLI 会话 | 进程、项目、面板绑定，输入/转录区焦点与官方快捷键的上下文 | 规划；没有向现有任务发送命令或恢复提示 |
+| DeepSeek | 本机 DeepSeek Harness | CLI／深链具体操作契约、会话范围、输入焦点 | 发现本机应用与 dsh URI；URI存在不等于已验证会话跳转 |
+| Hugging Face | HuggingChat 网页 | 具体域名与标签页、登录态、页面结构、会话及输入定位 | 规划；未读取用户网页或登录数据 |
+| Claude Code | Herdr／终端中的 Claude Code 会话 | 进程、项目、面板绑定，输入/转录区焦点与官方快捷键的上下文 | 规划；没有向现有任务发送命令或恢复提示 |
 | 微信 | 本机 macOS 客户端 | 会话定位、输入框、正文滚动、会话切换后的确认 | 规划；没有读取联系人／聊天内容，也未发送消息 |
 
 Claude Code 官方文档明确说明 Ctrl+C / Esc 的动作依运行状态与焦点而不同，因此不能把固定按键当作可靠的 stopTask。[官方交互文档](https://code.claude.com/docs/en/interactive-mode)
