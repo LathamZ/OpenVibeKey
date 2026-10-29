@@ -149,3 +149,11 @@ The lr.12 native renders, 447 checks and asynchronous termination check passed l
 The build is ad-hoc signed; local system permission readiness and physical acceptance remain
 separate. Changed signatures can invalidate existing grants. No system permissions are granted
 by the build or UI. Direct body/answer-card focus and task resume remain unimplemented.
+
+## lr.13 menu simplification
+
+Removed the Codex-only menu action and mode-status block. Session management remains available
+from the workspace under a generic window title. Hardware routing is unchanged. Dismissing
+first-use permission guidance now suppresses automatic re-presentation during this run; the
+explicit permission-check action remains available. Build, resource and 41 modifier checks
+passed; live dismissal acceptance was interrupted by concurrent user changes.

@@ -99,7 +99,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 10) {
                             Button("选择会话") { if !preview { controller.enter() } }.buttonStyle(.borderedProminent).disabled(!preview && !controller.ready)
-                            Button("管理会话") { if !preview { openWindow(id: "codex-navigation") } }.buttonStyle(.bordered)
+                            Button("管理会话") { if !preview { openWindow(id: "session-management") } }.buttonStyle(.bordered)
                         }
                     }
                 }

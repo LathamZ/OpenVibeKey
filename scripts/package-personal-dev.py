@@ -33,8 +33,8 @@ for locale in (ROOT / "scripts/app-localizations").glob("*.lproj"):
 info = {
     "CFBundleName": "Open VibeKey Dev", "CFBundleDisplayName": "Open VibeKey Dev",
     "CFBundleIdentifier": "com.openvibekey.app.dev", "CFBundleExecutable": "VibeKitApp",
-    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1.6-lr.12",
-    "CFBundleVersion": "19", "LSMinimumSystemVersion": "13.0", "LSUIElement": True,
+    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1.6-lr.13",
+    "CFBundleVersion": "20", "LSMinimumSystemVersion": "13.0", "LSUIElement": True,
     "NSHighResolutionCapable": True, "CFBundleDevelopmentRegion": "en",
     "NSMicrophoneUsageDescription": "Display live input levels for your VibeKey microphone.",
 }

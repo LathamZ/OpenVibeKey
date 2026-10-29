@@ -105,7 +105,7 @@ struct VibeKitApp: App {
         }
         .windowResizability(.contentSize)
 
-        Window("Codex 会话导航", id: "codex-navigation") {
+        Window("会话管理", id: "session-management") {
             CodexNavigationSettings(vm: vm, controller: vm.codexWorkflow)
         }
         .windowResizability(.contentSize)

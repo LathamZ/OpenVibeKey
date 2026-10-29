@@ -35,6 +35,7 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
     private var freshMicrophone: Bool?
     private var nextProbe: TimeInterval = 0
     private var requesting = false
+    private var guidanceDismissed = false
     var allGranted: Bool { checked && WorkflowDefaults.permissionsReady(accessibility: accessibility, inputMonitoring: inputMonitoring, microphone: microphone, notifications: notifications) }
 
     var navigationReady: Bool { checked && WorkflowDefaults.navigationPermissionsReady(accessibility: accessibility, inputMonitoring: inputMonitoring) }
@@ -126,7 +127,7 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
 
     func presentIfNeeded() {
         nextProbe = 0
-        if !navigationReady { present() }
+        if !navigationReady && !guidanceDismissed { present() }
         refresh()
     }
 
@@ -147,9 +148,17 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func windowShouldClose(_ sender: NSWindow) -> Bool { !restarting }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard !restarting else { return false }
+        guidanceDismissed = true
+        return true
+    }
     func refreshLanguage() { window?.title = L("权限检查") }
-    func close() { if !restarting { finishAuthorization() } }
+    func close() {
+        guard !restarting else { return }
+        guidanceDismissed = true
+        finishAuthorization()
+    }
 
     // Called only by the user's Settings buttons, never by the polling loop.
     func configure(_ permission: String) {

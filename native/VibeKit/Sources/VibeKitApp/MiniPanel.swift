@@ -118,12 +118,6 @@ struct MiniPanel: View {
                     // 不影响其余功能），可接受。
                     dismiss()
                 }
-                if vm.navigationOwnsHardware { RotaryModeStatus(controller: vm.codexWorkflow) }
-                menuRow(icon: "list.bullet.rectangle", title: "Codex 会话导航…") {
-                    openWindow(id: "codex-navigation")
-                    NSApp.activate(ignoringOtherApps: true)
-                    dismiss()
-                }
                 menuRow(icon: "power", title: L("退出 Open VibeKey")) { AppLifecycle.requestQuit() }
             }
         }
@@ -198,15 +192,5 @@ struct MiniPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(GhostButtonStyle())
-    }
-}
-
-private struct RotaryModeStatus: View {
-    @ObservedObject var controller: CodexWorkflowController
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Codex：" + controller.rotaryModeLabel)
-            Text("其他 App：←／→").foregroundStyle(.secondary)
-        }.font(.caption)
     }
 }
