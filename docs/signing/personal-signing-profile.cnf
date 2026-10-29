@@ -1,0 +1,19 @@
+# DESIGN TEMPLATE ONLY. No new certificate/private key has been generated.
+# Proposed public CN must be confirmed before issuance.
+# Proposed validity (5 years) and random serial are issuance parameters, not req config fields.
+[req]
+prompt = no
+default_bits = 3072
+default_md = sha256
+distinguished_name = subject
+x509_extensions = personal_codesign
+
+[subject]
+CN = LathamZ Software Signing
+
+[personal_codesign]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always

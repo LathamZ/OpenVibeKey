@@ -2,6 +2,20 @@
 
 2026-10-30. Proposal for future projects; no certificate rotation or external distribution is performed here.
 
+
+## Selected self-managed certificate distribution design
+
+The user explicitly selected a recipient-installed personal certificate route. The reviewable
+[personal signing design](docs/signing/PERSONAL-SIGNING.md) specifies a developer-level
+self-signed CA:false leaf, public-only certificate bundle, CodeSigning-only recipient trust,
+separate app permissions, renewal/removal and independent-Mac acceptance. It includes a
+recipient guide and an unsigned certificate-profile template. This does not require Apple
+Developer Program membership. No new identity has been issued or trusted yet.
+
+Installing the certificate is not a promise of default Gatekeeper acceptance: the existing
+app passes codesign verification but is rejected by read-only spctl assessment. A real
+quarantined download on a receiver Mac remains untested. Current VibeKey identity is retained.
+
 ## Current VibeKey identity
 
 The local identity is self-signed, subject/issuer Open VibeKey Local Development. It is a leaf
@@ -25,8 +39,8 @@ this comparison; use the actual app-owned PermissionCenter and PID-tagged startu
 | Role | Identity | Distribution |
 |---|---|---|
 | Local development | Persistent personal local certificate; future neutral name e.g. LathamZ Local Development | Own Macs, explicit local trust as required |
-| Small trusted test group | Local signing can be evaluated by recipients using the public certificate | Recipients explicitly manage trust and app permissions; not a seamless public release |
-| Public release | Apple-issued Developer ID Application plus notarization | Give recipients the signed/notarized app or archive; no custom personal-certificate installation workflow |
+| Self-managed distribution (selected) | Personal self-signed leaf and public certificate | Recipients explicitly manage code-signing trust, Gatekeeper launch decisions and app permissions; cross-Mac acceptance required |
+| Apple distribution route (optional alternative) | Apple-issued Developer ID Application plus notarization | Give recipients the signed/notarized app or archive; no custom personal-certificate installation workflow |
 | Signed macOS PKG | Developer ID Installer in addition to the signed app | Installer certificate signs PKG, not a substitute for the application's signature |
 
 Apple describes Developer ID signing and notarization as the outside-App-Store distribution path:
