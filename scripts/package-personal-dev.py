@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and package a local Dev bundle; never install or launch it."""
 import os
+import json
 from pathlib import Path
 import plistlib
 import shutil
@@ -13,6 +14,17 @@ PACKAGE = ROOT / "native/VibeKit"
 # the designated requirement depend on this build's cdhash and loses old grants.
 identity = os.environ.get("VIBEKEY_SIGN_IDENTITY", "").strip()
 allow_adhoc = os.environ.get("VIBEKEY_ALLOW_ADHOC") == "1"
+if not identity and not allow_adhoc:
+    local_config = Path.home() / ".config/openvibekey/dev-signing.json"
+    if local_config.exists():
+        try:
+            signing_config = json.loads(local_config.read_text())
+            identity = signing_config["identity_sha1"]
+            if signing_config.get("version") != 1 or not isinstance(identity, str) or len(identity) != 40:
+                raise ValueError("Expected version 1 and an exact certificate SHA-1 fingerprint")
+            int(identity, 16)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise SystemExit(f"Invalid local signing configuration; no fallback: {error}")
 if not identity or identity == "-":
     if not allow_adhoc:
         raise SystemExit(
@@ -59,11 +71,14 @@ for bundle in bin_dir.glob("*.bundle"):
     shutil.copytree(bundle, resources / bundle.name)
 for locale in (ROOT / "scripts/app-localizations").glob("*.lproj"):
     shutil.copytree(locale, resources / locale.name)
+bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "22")
+if not bundle_build.isdecimal() or int(bundle_build) <= 0:
+    raise SystemExit("VIBEKEY_BUNDLE_BUILD must be a positive integer")
 info = {
     "CFBundleName": "Open VibeKey Dev", "CFBundleDisplayName": "Open VibeKey Dev",
     "CFBundleIdentifier": "com.openvibekey.app.dev", "CFBundleExecutable": "VibeKitApp",
-    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1.6-lr.13",
-    "CFBundleVersion": "20", "LSMinimumSystemVersion": "13.0", "LSUIElement": True,
+    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1.6-lr.14",
+    "CFBundleVersion": bundle_build, "LSMinimumSystemVersion": "13.0", "LSUIElement": True,
     "NSHighResolutionCapable": True, "CFBundleDevelopmentRegion": "en",
     "NSMicrophoneUsageDescription": "Display live input levels for your VibeKey microphone.",
 }

@@ -72,7 +72,9 @@ To package a Dev app without installing or launching it:
 python3 scripts/package-personal-dev.py
 ```
 
-Packaging now requires an explicit existing signing identity via `VIBEKEY_SIGN_IDENTITY`.
+Packaging requires a persistent signing identity: an explicit `VIBEKEY_SIGN_IDENTITY` takes precedence;
+otherwise the local `~/.config/openvibekey/dev-signing.json` version1 configuration supplies
+`identity_sha1` (the exact certificate fingerprint). This file and private keys stay outside Git.
 The identity must resolve unambiguously in the current code-signing keychain; missing/invalid
 configuration fails before building, without silently falling back to ad-hoc. Reuse the same
 identity and bundle identifier for updates. No identity or credentials are stored in this repo.
@@ -177,3 +179,15 @@ keys private and local; do not add raw logs, identity configuration or certifica
 
 References: [Apple DTS](https://developer.apple.com/forums/thread/718331),
 [Apple TN2206](https://developer.apple.com/library/archive/technotes/tn2206/_index.html).
+
+## Persistent local certificate checkpoint
+
+A local self-signed leaf certificate/private key was created with CA:false and codeSigning EKU.
+The user explicitly approved current-user CodeSigning-only trust. No system-root/TLS trust
+or TCC grants were added. Existing user trust entries were verified unchanged.
+
+First private-key use still requires native Keychain confirmation; computer-use cannot operate
+SecurityAgent. No signed package/update retention is claimed yet. After confirmation, package
+two builds using `VIBEKEY_BUNDLE_BUILD=21` and the normal default22; compare real designated
+requirements and CDHashes, then test permissions from a granted A baseline across actual B
+replacement. A denied-to-denied check is not proof of preservation.
