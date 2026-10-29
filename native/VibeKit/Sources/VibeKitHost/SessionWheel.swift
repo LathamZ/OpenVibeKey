@@ -81,3 +81,29 @@ public struct WheelPagePress {
     public mutating func cancel() { stamps.removeAll() }
     public mutating func reset() { self = Self() }
 }
+
+
+/// Fractional physical detents plus nearest-stop settling. No acceleration or synthetic events.
+public struct SessionWheelMotion {
+    public private(set) var position = 0.0
+    public private(set) var count = 0
+    public private(set) var start = 0
+    public init() {}
+    public static func steps(_ raw: Double) -> Double { raw.isFinite ? min(8, max(1, raw.rounded())) : 3 }
+    public mutating func reset(selection: Int, total: Int) {
+        let range = SessionWheelPaging.range(selection: selection, count: total)
+        start = range.lowerBound; count = range.count
+        position = Double(max(0, min(selection - start, count - 1)))
+    }
+    public mutating func turn(_ delta: Int, stepsPerItem: Double) {
+        guard count > 1 else { return }
+        position += Double(delta) / Self.steps(stepsPerItem)
+        if abs(position) > 1_000_000 { position = position.truncatingRemainder(dividingBy: Double(count)) }
+    }
+    public var nearest: Int {
+        guard count > 0 else { return start }
+        let value = position.rounded(.toNearestOrAwayFromZero).truncatingRemainder(dividingBy: Double(count))
+        return start + Int((value + Double(count)).truncatingRemainder(dividingBy: Double(count)))
+    }
+    public mutating func settle() { position = position.rounded(.toNearestOrAwayFromZero) }
+}

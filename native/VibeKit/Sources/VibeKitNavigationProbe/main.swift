@@ -404,5 +404,36 @@ do {
     }
 }
 
+// Physical detents produce fractional movement, then settle to the nearest visible conversation.
+do {
+    for count in [0,1,2,3,8,9,19] {
+        for step in [1.0,2,3,8] {
+            var m = SessionWheelMotion(); m.reset(selection: 0, total: count)
+            m.turn(1, stepsPerItem: step)
+            check("motion remains finite", m.position.isFinite)
+            check("motion nearest valid", count == 0 ? m.nearest == 0 : (0..<min(count,8)).contains(m.nearest))
+            m.settle()
+            check("settle lands on exact stop", m.position == m.position.rounded())
+        }
+    }
+    var m = SessionWheelMotion(); m.reset(selection: 0, total: 8)
+    m.turn(1, stepsPerItem: 3)
+    check("default slower than one item per detent", m.nearest == 0 && abs(m.position - 1.0/3) < 0.0001)
+    m.settle(); check("less than halfway attracts back", m.nearest == 0 && m.position == 0)
+    m.turn(2, stepsPerItem: 3); check("more than halfway selects next", m.nearest == 1)
+    m.settle(); check("more than halfway attracts forward", m.nearest == 1 && m.position == 1)
+    m.reset(selection: 0, total: 8); m.turn(-2, stepsPerItem: 3); m.settle()
+    check("negative wrap follows nearest stop", m.nearest == 7 && m.position == -1)
+    m.turn(2, stepsPerItem: 3); m.settle(); check("direction reversal settles symmetrically", m.nearest == 0)
+    m.reset(selection: 18, total: 19); m.turn(1, stepsPerItem: 1); m.settle()
+    check("partial disc wraps only real cards", m.nearest == 16)
+    m.reset(selection: 10, total: 19); check("page change resets residual", m.position == 2 && m.nearest == 10)
+    m.turn(1, stepsPerItem: 8); m.reset(selection: 0, total: 8)
+    check("fresh selector never inherits partial travel", m.position == 0)
+    m.turn(Int.max, stepsPerItem: 3);m.settle();check("extreme input remains bounded valid", (0..<8).contains(m.nearest) && m.position.isFinite)
+    check("sensitivity sanitized", SessionWheelMotion.steps(.nan) == 3 && SessionWheelMotion.steps(.infinity) == 3 && SessionWheelMotion.steps(-1) == 1 && SessionWheelMotion.steps(100) == 8)
+    m.reset(selection: 0, total: 8);m.turn(1, stepsPerItem: 2);m.settle();check("halfway tie advances consistently", m.nearest == 1)
+}
+
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
 exit(failures == 0 ? 0 : 1)

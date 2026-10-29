@@ -119,11 +119,11 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                 workspaceCard {
                     VStack(alignment: .leading, spacing: 15) {
                         Label("按钮", systemImage: "circle.grid.3x1").font(.headline)
-                        actionRow("按钮 1", vm.buttons.first?.current ?? "沿用设备配置")
-                        actionRow("按钮 2", vm.buttons.dropFirst().first?.current ?? "沿用设备配置")
-                        actionRow("底部键", "退格 · 按住连删")
+                        hardwareRow("btn1", vm.buttons.first?.current ?? "沿用设备配置")
+                        hardwareRow("btn2", vm.buttons.dropFirst().first?.current ?? "沿用设备配置")
+                        hardwareRow("btn3", "退格 · 按住连删")
                         Divider()
-                        Text("选择列表中，底部键用于取消。")
+                        Text("转盘中：1 上一盘，2 下一盘，3 取消。")
                             .font(.callout).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -221,6 +221,9 @@ struct WorkspaceShell<DeviceSettings: View>: View {
             Text((preview || granted) ? "已准备" : "待授权").font(.caption).foregroundStyle(.secondary)
             if !preview && !granted { Button("前往授权") { PermissionCenter.shared.configure(id) }.buttonStyle(.borderless) }
         }.padding(.top, 12)
+    }
+    private func hardwareRow(_ id: String, _ value: String) -> some View {
+        HStack { HardwareButtonLabel(id: id).foregroundStyle(.secondary); Spacer(); Text(value).multilineTextAlignment(.trailing) }.font(.callout)
     }
     private func actionRow(_ title: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline) { Text(title).foregroundStyle(.secondary); Spacer(); Text(value).multilineTextAlignment(.trailing) }.font(.callout)

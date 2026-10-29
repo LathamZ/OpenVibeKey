@@ -2,6 +2,11 @@ import AppKit
 import SwiftUI
 import VibeKitHost
 
+private final class SessionWheelPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 @MainActor
 final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var navigation = CodexNavigation()
@@ -19,6 +24,30 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     var filteredSessions: [CodexSession] { CodexSessionCatalog.filter(sessions, query: selectorQuery, projects: projectNames) }
     func isPinned(_ id: String) -> Bool { pinnedSessions.contains { $0.id == id } }
     func project(_ id: String) -> String { projectNames[id] ?? "固定会话" }
+    @Published private(set) var wheelPosition = 0.0
+    @Published private(set) var wheelSnapping = false
+    @Published private(set) var wheelStepsPerItem = 3.0
+    private var wheelMotion = SessionWheelMotion()
+    private var wheelSettleTask: DispatchWorkItem?
+    private let wheelStepsKey = "sessionWheel.stepsPerItem.v1"
+    func setWheelSteps(_ raw: Double) {
+        wheelStepsPerItem = SessionWheelMotion.steps(raw)
+        if !preview { defaults.set(wheelStepsPerItem, forKey: wheelStepsKey) }
+        resetWheelMotion()
+    }
+    private func resetWheelMotion() {
+        wheelSettleTask?.cancel(); wheelSettleTask = nil
+        wheelMotion.reset(selection: navigation.selection, total: navigation.candidates.count)
+        wheelSnapping = true; wheelPosition = wheelMotion.position
+    }
+    private func settleWheelMotion() {
+        wheelSettleTask?.cancel(); wheelSettleTask = nil
+        guard navigation.stage == .choosing else { return }
+        wheelMotion.settle(); wheelSnapping = true; wheelPosition = wheelMotion.position
+        if navigation.candidates.indices.contains(wheelMotion.nearest) {
+            navigation.select(id: navigation.candidates[wheelMotion.nearest].id)
+        }
+    }
     @Published private(set) var colorLedger = SessionColorLedger()
     private var localOpened: [String: Double] = [:]
     private let colorKey = "sessionWheel.colors.v1"
@@ -52,11 +81,14 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         ensureColors()
         let ordered = wheelSessions
         navigation.enter(sessions: ordered, preferredID: preferredID ?? ordered.first?.id)
+        resetWheelMotion()
     }
     func turnWheelPage(_ delta: Int) {
         guard (ready || preview), navigation.stage == .choosing, !selectorLoading, !pageRoutingBusy else { return }
         let previous = navigation.selection
+        settleWheelMotion()
         navigation.turnWheelPage(delta)
+        resetWheelMotion()
         if previous != navigation.selection { selectorGeneration = UUID(); cancelPendingGestures?() }
     }
     @Published var message = "导航模式未启用。"
@@ -113,6 +145,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         if !preview, let data = defaults.data(forKey: colorKey), let saved = try? JSONDecoder().decode(SessionColorLedger.self, from: data) { colorLedger = SessionColorLedger(colors: saved.colors) }
         if !preview, let data = defaults.data(forKey: openedKey), let saved = try? JSONDecoder().decode([String: Double].self, from: data) { localOpened = saved.filter { $0.value.isFinite && $0.value >= 0 } }
         super.init()
+        if !preview, let saved = defaults.object(forKey: wheelStepsKey) as? Double { wheelStepsPerItem = SessionWheelMotion.steps(saved) }
         if preview, CommandLine.arguments.contains("--preview-many-sessions") {
             recentThreads = (1...19).map { i in
                 let id = String(format: "00000000-0000-0000-0000-%012d", i)
@@ -195,7 +228,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         cancelRefresh()
         let generation = UUID(); refreshGeneration = generation
         refreshing = true; selectorLoading = replaceSelector; refreshError = nil
-        if replaceSelector { cancelPendingGestures?() }
+        if replaceSelector { cancelPendingGestures?(); resetWheelMotion() }
         listStatus = "正在读取本机未归档会话…"
         guard let executable = codexNavigationCLIURL() else {
             refreshing = false; selectorLoading = false
@@ -241,9 +274,10 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
     func dismissSelector() {
         guard (ready || preview), navigation.stage == .choosing, !pageRoutingBusy else { return }
-        // Exactly the same path as clicking this owned window's close button.
+        // Borderless overlay has no native close button; use its delegate-backed close path.
+        // Exactly the same cancellation semantics as the owned close button.
         // The delegate suspends selection; no highlighted chat is opened.
-        panel?.performClose(nil)
+        panel?.close()
     }
     func gesture(_ action: PressGesture.Action, control: CodexNavigation.Control) {
         guard (ready || preview), !pageRoutingBusy else { return }
@@ -252,24 +286,41 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         if action == .single, control == .dial, navigation.stage == .openRequested {
             toggleRotaryMode(); return
         }
+        if navigation.stage == .choosing, control == .dial, action == .single { settleWheelMotion() }
         let previous = navigation.stage
         let effects = navigation.gesture(action, control: control, sessions: sessions)
         if previous != navigation.stage { cancelPendingGestures?() }
-        if navigation.stage != .choosing { cancelRefresh(); panel?.orderOut(nil) }
+        if navigation.stage != .choosing { wheelSettleTask?.cancel(); cancelRefresh(); panel?.orderOut(nil) }
         execute(effects)
         refreshPhysicalFocusRoute()
     }
     func rotate(_ delta: Int) {
         guard (ready || preview), !selectorLoading, !pageRoutingBusy else { return }
-        if navigation.stage == .choosing { navigation.rotateWheel(delta) }
+        if navigation.stage == .choosing {
+            wheelSettleTask?.cancel()
+            wheelMotion.turn(delta, stepsPerItem: wheelStepsPerItem)
+            wheelSnapping = false; wheelPosition = wheelMotion.position
+            if navigation.candidates.indices.contains(wheelMotion.nearest) {
+                navigation.select(id: navigation.candidates[wheelMotion.nearest].id)
+            }
+            let generation = selectorGeneration
+            let task = DispatchWorkItem { [weak self] in
+                guard let self, self.selectorGeneration == generation, self.navigation.stage == .choosing else { return }
+                self.settleWheelMotion()
+            }
+            wheelSettleTask = task
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: task)
+        }
         else { execute(navigation.rotate(delta)) }
     }
-    func choose(_ id: String) { if !selectorLoading { navigation.select(id: id) } }
+    func choose(_ id: String) { if !selectorLoading, !pageRoutingBusy { navigation.select(id: id); resetWheelMotion() } }
     func suspend(message: String) {
+        wheelSettleTask?.cancel(); wheelSettleTask = nil
         selectorGeneration = UUID()
         navigation.suspend(); captureRotaryForNavigation(); cancelRefresh(); cancelPendingGestures?(); panel?.orderOut(nil); self.message = message
     }
     func stop() {
+        wheelSettleTask?.cancel(); wheelSettleTask = nil
         selectorGeneration = UUID()
         ready = false; captureRotaryForNavigation(); cancelRefresh(); cancelPendingGestures?(); navigation.reset(); panel?.orderOut(nil); notice?.orderOut(nil)
     }
@@ -333,9 +384,12 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
     private func present() {
         if panel == nil {
-            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: wheelPanelSize.width, height: wheelPanelSize.height),
-                                styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            let panel = SessionWheelPanel(contentRect: NSRect(x: 0, y: 0, width: wheelPanelSize.width, height: wheelPanelSize.height),
+                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.title = "选择会话"
+            panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
+            panel.isMovableByWindowBackground = true
+            panel.isFloatingPanel = true; panel.becomesKeyOnlyIfNeeded = false
             panel.isReleasedWhenClosed = false; panel.level = .floating; panel.hidesOnDeactivate = false
             panel.delegate = self
             panel.contentView = NSHostingView(rootView: SessionWheelView(controller: self))
@@ -345,6 +399,10 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         // instead of leaving keyboard focus in the composer behind it.
         NSApplication.shared.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
+    }
+    var selectorIsTransparentOverlay: Bool {
+        guard let panel else { return false }
+        return !panel.isOpaque && panel.backgroundColor.alphaComponent == 0 && !panel.styleMask.contains(.titled)
     }
     var selectorIsKeyWindow: Bool { panel?.isKeyWindow == true }
     var selectorIsVisible: Bool { panel?.isVisible == true }
@@ -356,6 +414,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         do { try data.write(to: URL(fileURLWithPath: path)); return true } catch { return false }
     }
     func windowWillClose(_ notification: Notification) {
+        wheelSettleTask?.cancel(); wheelSettleTask = nil
         selectorGeneration = UUID()
         cancelRefresh(); cancelPendingGestures?()
         if navigation.stage == .choosing {
@@ -385,6 +444,7 @@ struct CodexNavigationSettings: View {
                 Text(controller.rotaryModeLabel).font(.caption).foregroundStyle(.secondary)
                 if controller.busy || controller.pageRoutingBusy { ProgressView().controlSize(.small) }
             }
+            WheelSensitivitySettings(controller: controller)
             Text(controller.message).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
             Divider()
             HStack {
@@ -437,18 +497,23 @@ struct CodexNavigationSettings: View {
 func runCodexNavigationPreview() {
     let app = NSApplication.shared
     app.setActivationPolicy(.regular)
+    // A raw layout preview has no SwiftUI application loop yet. Finish native startup before key-window assertions.
+    app.finishLaunching()
     let controller = CodexWorkflowController(defaults: UserDefaults(suiteName: "com.openvibekey.navigation-preview")!, preview: true)
     controller.enter()
     if let i = CommandLine.arguments.firstIndex(of: "--preview-wheel-page"), i + 1 < CommandLine.arguments.count,
        let page = Int(CommandLine.arguments[i + 1]) { controller.turnWheelPage(page) }
     if CommandLine.arguments.contains("--preview-empty-wheel") { controller.selectorQuery = "no-fixture-matches"; controller.applySelectorQuery() }
+    if let i = CommandLine.arguments.firstIndex(of: "--preview-motion-check"), i + 1 < CommandLine.arguments.count {
+        runWheelMotionCheck(controller: controller, outputPath: CommandLine.arguments[i + 1])
+    }
     app.activate(ignoringOtherApps: true)
     print("NAVIGATION_PREVIEW_READY no_hardware_writes=true codex_control=false")
     fflush(stdout)
     if CommandLine.arguments.contains("--preview-key-check") {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            print("SELECTOR_OWN_KEY_WINDOW=\(controller.selectorIsKeyWindow)")
-            fflush(stdout); exit(controller.selectorIsKeyWindow ? 0 : 1)
+            print("SELECTOR_OWN_KEY_WINDOW=\(controller.selectorIsKeyWindow) TRANSPARENT_OVERLAY=\(controller.selectorIsTransparentOverlay)")
+            fflush(stdout); exit(controller.selectorIsKeyWindow && controller.selectorIsTransparentOverlay ? 0 : 1)
         }
     }
     if CommandLine.arguments.contains("--preview-close-check") {

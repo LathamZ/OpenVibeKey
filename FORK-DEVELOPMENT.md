@@ -6,7 +6,7 @@ MIT license and upstream attribution are retained. This is an experimental perso
 not an upstream release. The upstream README describes upstream behavior; this document
 covers the experimental workflow on `feat/codex-workflow`.
 
-Current design: [multi-application workspace](ARCHITECTURE.md), lr.16. A shared interaction
+Current design: [multi-application workspace](ARCHITECTURE.md), lr.17. A shared interaction
 model covers Codex, DeepSeek, Hugging Face, Claude Code and WeChat; only Codex has a runtime
 integration today. Other catalog entries remain explicitly pending.
 Confirmed targets: local DeepSeek Harness, HuggingChat in the browser, and Claude Code
@@ -58,7 +58,7 @@ swift run -c release VibeKitThreadListProbe
 swift run -c release VibeKitHostProbe
 ```
 
-The first two probes contain 651 navigation/paging/startup/recovery and 92 focus/hold checks at this
+The first two probes contain 747 navigation/paging/startup/recovery and 92 focus/hold checks at this
 snapshot; thread fixtures contain 28 checks and packaged modifier validation contains 41. Thread-list probes use a local Python fixture, not the real Codex account. The above
 probes do not change hardware settings. Focus/host probes temporarily register and release real
 Carbon hotkeys; run them in a normal desktop session with the device controller quit to avoid
@@ -243,3 +243,30 @@ hardware configuration. This update reuses the existing developer certificate an
 checks, 41 modifier checks and four isolated controller color-persistence checks passed.
 Native full-page, partial-page and empty-state layouts were inspected. Physical page keys,
 rotary feel and live halo appearance remain separate operator acceptance of this first version.
+
+
+## lr.17 floating white wheel and detent sensitivity
+
+The selector is now a transparent, borderless native floating panel. Only white conversation
+cards, a white central disc and the ring render; there is no full-window fill or desktop dimmer.
+Color appears only in persistent conversation dots. Selection uses neutral outlines, white
+breathing halos and a slight scale change. Partial pages distribute their real items evenly
+around the circle. The panel can become key and cancellation uses its own close delegate.
+
+Device Settings → Conversation Wheel contains a persistent sensitivity slider (also available
+in session management). One conversation spacing corresponds to 1–8 physical detents, default 3;
+“steady” needs more detents and “fast” fewer. Fractional movement is retained during turns and
+settles to the nearest conversation after 280ms without another detent. Confirmation settles
+before opening; paging, refresh, cancellation and context changes clear the old motion intent.
+The hardware reports discrete turns, not a hand-release angle: idle timing approximates release.
+The spring is visual feedback, not hardware force feedback. Normal arrows/body paging are unchanged.
+
+All three physical button identities are visible, including during workflow ownership:
+1 microphone, 2 checkmark, 3 cross, top to bottom. Shared native vector legends reference the
+bundled product photo; no product-photo raster is modified. In the selector 1/2 page and 3 cancels;
+icons identify the physical controls independently of their temporary actions.
+
+747 navigation/paging/motion checks, seven isolated settings/color persistence checks and five
+actual controller idle-timer/transparent-panel checks passed, along with native key-window/close
+checks and inspected full/partial/device-settings renders. The package retained the existing
+certificate-based requirement. A connected-device physical trial remains independent validation.

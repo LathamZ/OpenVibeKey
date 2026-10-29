@@ -34,6 +34,7 @@ struct ContentView: View {
         WorkspaceShell(vm: vm, preview: CommandLine.arguments.contains("--workspace-preview")) {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                WheelSensitivitySettings(controller: vm.codexWorkflow)
                 sentinelNoticeBanner
                 if !vm.connected { offlineAppBindingsCard }
                 if vm.connected {
@@ -283,7 +284,14 @@ struct ContentView: View {
                         .background(Color.accentColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
                 } else { dialGroup }
                 ForEach(vm.buttons.indices, id: \.self) { i in
-                    if !vm.navigationOwnsHardware || vm.buttons[i].id != "btn3" {
+                    if vm.navigationOwnsHardware {
+                        HStack {
+                            HardwareButtonLabel(id: vm.buttons[i].id).font(.headline)
+                            Spacer()
+                            Text(vm.buttons[i].id == "btn3" ? "退格 · 按住连删 ／ 转盘取消" : vm.buttons[i].id == "btn1" ? "原键位 ／ 转盘上一盘" : "原键位 ／ 转盘下一盘")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }.padding(12).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+                    } else {
                     ShortcutEditor(b: $vm.buttons[i],
                                    onApply: { vm.applyShortcut(i) },
                                    onClear: { vm.clearShortcut(i) },

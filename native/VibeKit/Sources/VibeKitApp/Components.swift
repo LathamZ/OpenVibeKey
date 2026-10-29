@@ -29,7 +29,10 @@ struct ShortcutEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(L(b.title)).font(.system(.headline, design: .rounded)).reportFrame("label:\(b.id)")
+                Group {
+                    if HardwareButtonIdentity.symbol(b.id) != nil { HardwareButtonLabel(id: b.id) }
+                    else { Text(L(b.title)) }
+                }.font(.system(.headline, design: .rounded)).reportFrame("label:\(b.id)")
                 Spacer()
                 Text(localizedShortcut(b))
                     .font(.system(.callout, design: .rounded).weight(.semibold))
