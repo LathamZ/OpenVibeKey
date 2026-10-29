@@ -4,12 +4,14 @@ import AVFoundation
 import ApplicationServices
 import UserNotifications
 import VibeKitHost
+import IOKit.hid
 
 /// Process-owned: closing System Settings or the main window never stops polling.
 @MainActor
 final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
     static let shared = PermissionCenter()
     @Published private(set) var accessibility = false
+    @Published private(set) var inputMonitoring = false
     @Published private(set) var microphone = false
     @Published private(set) var notifications = false
     @Published private(set) var checked = false
@@ -24,13 +26,18 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
     private var completion = PermissionCompletion()
     private let accessibilityProbe = DialPermissionProbe()
     private let microphoneProbe = DialPermissionProbe()
+    private let inputMonitoringProbe = DialPermissionProbe()
+    private var inputMonitoringProbed = false
+    private var freshInputMonitoring: Bool?
     private var accessibilityProbed = false
     private var microphoneProbed = false
     private var freshAccessibility: Bool?
     private var freshMicrophone: Bool?
     private var nextProbe: TimeInterval = 0
     private var requesting = false
-    var allGranted: Bool { checked && accessibility && microphone && notifications }
+    var allGranted: Bool { checked && WorkflowDefaults.permissionsReady(accessibility: accessibility, inputMonitoring: inputMonitoring, microphone: microphone, notifications: notifications) }
+
+    var navigationReady: Bool { checked && WorkflowDefaults.navigationPermissionsReady(accessibility: accessibility, inputMonitoring: inputMonitoring) }
 
     func start() {
         guard timer == nil else { return }
@@ -52,6 +59,10 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
                 self?.freshAccessibility = value
                 self?.accessibilityProbed = true
             }
+            inputMonitoringProbe.check(argument: DialPermissionProbe.inputMonitoringArgument) { [weak self] value in
+                self?.freshInputMonitoring = value
+                self?.inputMonitoringProbed = true
+            }
             microphoneProbe.check(argument: DialPermissionProbe.microphoneArgument) { [weak self] value in
                 self?.freshMicrophone = value
                 self?.microphoneProbed = true
@@ -64,21 +75,22 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
                 self.querying = false
                 // Establish the launch baseline from fresh results before deciding a
                 // permission was newly granted; stale parent APIs must not cause a loop.
-                guard self.accessibilityProbed, self.microphoneProbed else { return }
-                let wasGranted = self.allGranted
+                guard self.accessibilityProbed, self.microphoneProbed, self.inputMonitoringProbed else { return }
+                let wasGranted = self.navigationReady
                 self.accessibility = PermissionEvidence.granted(current: AXIsProcessTrusted(), fresh: self.freshAccessibility)
                 self.microphone = PermissionEvidence.granted(
                     current: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
                     fresh: self.freshMicrophone)
+                self.inputMonitoring = PermissionEvidence.granted(current: IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted, fresh: self.freshInputMonitoring)
                 self.notifications = allowed
                 let firstCheck = !self.checked
                 self.checked = true
-                let shouldRestart = self.completion.observe(allGranted: self.allGranted)
-                if !self.allGranted {
+                let shouldRestart = self.completion.observe(allGranted: self.navigationReady)
+                if !self.navigationReady {
                     if firstCheck || wasGranted { self.present() }
                 } else if shouldRestart {
                     if AXIsProcessTrusted(), DialSingleAction.canPost,
-                       AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+                       IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted {
                         self.finishAuthorization()
                     } else {
                         self.restarting = true
@@ -88,10 +100,10 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
                         self.window?.orderOut(nil)
                         AppLifecycle.requestRestart()
                     }
-                } else if self.allGranted, UserDefaults.standard.bool(forKey: Self.reopenKey) {
+                } else if self.navigationReady, firstCheck || UserDefaults.standard.bool(forKey: Self.reopenKey) {
                     self.finishAuthorization()
                 }
-                self.window?.standardWindowButton(.closeButton)?.isEnabled = self.allGranted && !self.restarting
+                self.window?.standardWindowButton(.closeButton)?.isEnabled = !self.restarting
             }
         }
     }
@@ -114,13 +126,13 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
 
     func presentIfNeeded() {
         nextProbe = 0
-        if !allGranted { present() }
+        if !navigationReady { present() }
         refresh()
     }
 
     func present() {
         if window == nil {
-            let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
+            let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 600),
                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
             panel.title = L("权限检查")
             panel.isReleasedWhenClosed = false
@@ -129,15 +141,15 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
             panel.center()
             window = panel
         }
-        window?.standardWindowButton(.closeButton)?.isEnabled = allGranted && !restarting
+        window?.standardWindowButton(.closeButton)?.isEnabled = !restarting
         window?.title = L("权限检查")
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func windowShouldClose(_ sender: NSWindow) -> Bool { allGranted && !restarting }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { !restarting }
     func refreshLanguage() { window?.title = L("权限检查") }
-    func close() { if allGranted && !restarting { finishAuthorization() } }
+    func close() { if !restarting { finishAuthorization() } }
 
     // Called only by the user's Settings buttons, never by the polling loop.
     func configure(_ permission: String) {
@@ -147,6 +159,9 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
         case "accessibility":
             DialSingleAction.requestPermission()
             open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        case "inputMonitoring":
+            _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+            open("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
         case "microphone":
             if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
                 requesting = true
@@ -184,20 +199,23 @@ private struct PermissionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(L("权限检查")).font(.title2.bold())
-            Text(L("请点击设置完成以下授权。状态会自动更新，全部通过后才能关闭此窗口。"))
+            Text(L("辅助功能与输入监控用于导航；麦克风和通知可按需授权。状态会自动更新，也可先进入工作台。"))
                 .font(.callout).foregroundStyle(.secondary)
-            row("辅助功能", detail: "隐私与安全性 → 辅助功能：用于旋钮单击与双击识别。", granted: center.accessibility, id: "accessibility")
+            row("辅助功能", detail: "识别 VibeKey 快捷键；导航必需。", granted: center.accessibility, id: "accessibility")
+            row("输入监控", detail: "识别 VibeKey 的旋钮按下与释放；授权后自动启用。", granted: center.inputMonitoring, id: "inputMonitoring")
             row("麦克风", detail: "隐私与安全性 → 麦克风：用于麦克风电平测试。", granted: center.microphone, id: "microphone")
             row("通知", detail: "通知 → 当前 App：允许通知，用于提示配置切换结果。", granted: center.notifications, id: "notifications")
-            Text(L(center.restarting ? "权限已全部开启，正在重启 App…" : "授权完成后自动打开主页面；必要时会重启 App。"))
+            Text(L(center.restarting ? "导航权限已开启，正在重启 App…" : "导航权限准备好后自动启用；必要时会重启 App。"))
                 .font(.caption).foregroundStyle(.secondary)
             if let error = center.error { Text(error.rendered()).font(.caption).foregroundStyle(.red) }
+            Text("输入定位固定使用 ⌃⌥⌘F12；Codex 中需绑定为“聚焦主聊天输入框”。")
+                .font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button(L("退出 App")) { NSApp.terminate(nil) }
+                Button(L("退出 App")) { AppLifecycle.requestQuit() }
                 Spacer()
-                Button(L("完成")) { center.close() }.disabled(!center.allGranted || center.restarting)
+                Button("进入工作台") { center.close() }.disabled(center.restarting)
             }
-        }.padding(24).frame(width: 520)
+        }.padding(24).frame(width: 560)
             .environment(\.locale, language.locale)
             .onChange(of: language.resolved) { _ in center.refreshLanguage() }
     }

@@ -66,11 +66,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         } else {
             self.pinnedSessions = []
         }
-        let storedFocusKey = defaults.string(forKey: "codexNavigation.nativeFocus.key") ?? NativeFocusShortcut.defaultMainKey
-        nativeFocusMainKey = NativeFocusShortcut.allowedMainKeys.contains(storedFocusKey) ? storedFocusKey : NativeFocusShortcut.defaultMainKey
-        nativeFocusConfigured = defaults.bool(forKey: "codexNavigation.nativeFocus.configured")
-        nativePageScrollEnabled = defaults.object(forKey: "codexNavigation.nativePages.enabled") == nil
-            ? true : defaults.bool(forKey: "codexNavigation.nativePages.enabled")
+        nativeFocusMainKey = WorkflowDefaults.focusMainKey
+        nativeFocusConfigured = WorkflowDefaults.nativeFocus
+        nativePageScrollEnabled = WorkflowDefaults.browsingPages
         super.init()
         if preview, CommandLine.arguments.contains("--preview-many-sessions") {
             recentThreads = (1...9).map { i in
@@ -383,25 +381,16 @@ struct CodexNavigationSettings: View {
     var body: some View {
         ScrollView {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Codex 会话导航 · 验证版").font(.title2.bold())
-            Text("长按旋钮选择会话，转动切换候选，单击请求打开。")
-            Text("进入会话后单击旋钮切换编辑 ←／→ 和浏览 PageUp／PageDown；其他 App 默认 ←／→。长按旋钮并松开返回列表。第三键用于退格。")
+            Text("会话").font(.system(size: 25, weight: .semibold, design: .rounded))
+            Text("选择正在处理的会话，旋钮的操作方式保持一致。")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button(controller.hasRecovery ? "重试恢复原键位" : controller.ready ? "关闭并恢复原键位" : "启用硬件导航") {
-                    vm.setCodexNavigationEnabled(!controller.ready && !controller.hasRecovery)
-                }.disabled(controller.busy || controller.pageRoutingBusy || !vm.connected || vm.applyingProfile || vm.dialGestureBusy)
-                Button("选择会话") { controller.enter() }.disabled(!controller.ready)
+                Button("选择会话") { controller.enter() }.buttonStyle(.borderedProminent).disabled(!controller.ready)
+                Spacer()
+                Text(controller.rotaryModeLabel).font(.caption).foregroundStyle(.secondary)
                 if controller.busy || controller.pageRoutingBusy { ProgressView().controlSize(.small) }
             }
             Text(controller.message).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-            Toggle("下次启动自动启用硬件导航", isOn: Binding(
-                get: { vm.navigationStartupEnabled }, set: { vm.setNavigationStartupEnabled($0) }))
-            Text("会记住手动启用／关闭的选择。正常退出仍恢复原键位；启动后等设备配置核对完成再启用。检测到异常恢复记录时，本次先恢复原值，等待你手动启用。")
-                .font(.caption).foregroundStyle(.secondary)
-            NativePagesSetupView(controller: controller)
-            NativeBackspaceHelpView()
-            NativeFocusSetupView(controller: controller, locked: vm.navigationOwnsHardware)
             Divider()
             HStack {
                 Text("本机会话与固定会话（\(controller.sessions.count)）").font(.headline)
@@ -430,17 +419,17 @@ struct CodexNavigationSettings: View {
                         }
                     }
                 }
-            }.frame(height: 115)
+            }.frame(minHeight: 220, maxHeight: 330)
             TextField("会话名称", text: $title)
             TextField("Codex 会话 ID 或 codex://threads/…", text: $reference)
             Button("添加会话") {
                 if controller.addSession(reference: reference, title: title) { reference = ""; title = "" }
             }.disabled(controller.busy || controller.navigation.stage == .choosing || controller.navigation.stage == .opening)
-            Text("启用时临时接管旋钮三动作和最下面的按钮，原键位会先保存并核对。关闭或正常退出时恢复；意外退出后的下次连接会优先恢复，不自动重新启用导航。")
+            Text("设备与权限就绪后自动准备导航。需要暂停或恢复原键位时，请到主窗口的“连接与权限”。")
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(22).frame(width: 590)
         }.frame(width: 590, height: min(720, max(500, (NSScreen.main?.visibleFrame.height ?? 820) - 100)))
-            .onAppear { if !controller.refreshing, controller.navigation.stage != .choosing { controller.refreshSessions() } }
+            .onAppear { if !CommandLine.arguments.contains("--workspace-preview"), !controller.refreshing, controller.navigation.stage != .choosing { controller.refreshSessions() } }
     }
 }
 
@@ -514,28 +503,13 @@ private struct NativeFocusSetupView: View {
     @ObservedObject var controller: CodexWorkflowController
     let locked: Bool
     var body: some View {
-        GroupBox("Codex 原生聚焦快捷键") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("主键", selection: Binding(get: { controller.nativeFocusMainKey }, set: {
-                        controller.configureNativeFocus(enabled: false, mainKey: $0)
-                    })) {
-                        ForEach(NativeFocusShortcut.allowedMainKeys, id: \.self) { Text($0).tag($0) }
-                    }.disabled(locked)
-                    Text("请绑定：" + controller.focusShortcutDisplay).font(.headline).textSelection(.enabled)
-                    Text("先关闭硬件导航，再到 Codex 设置 → 键盘快捷键，找到“聚焦主聊天输入框”（Focus main chat），绑定上面的组合键。不要绑定发送消息。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Toggle("我已完成绑定，启用原生聚焦", isOn: Binding(get: { controller.nativeFocusConfigured }, set: {
-                        controller.configureNativeFocus(enabled: $0, mainKey: controller.nativeFocusMainKey)
-                    })).disabled(locked)
-                    Text("内容层短按旋钮切换编辑／浏览并发出原生聚焦键。启用输入监控后，按住旋钮至少 0.65 秒并松开可返回列表；长按期间 Codex 也会收到聚焦键。也可从菜单栏点击“选择会话”。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(controller.physicalRotaryStatus).font(.caption).foregroundStyle(.secondary)
-                    Button("授权／重试旋钮长按监听") { controller.retryPhysicalRotaryMonitoring?() }
-                        .disabled(!controller.ready)
-                    Text("若系统要求，请在系统设置 → 隐私与安全性 → 输入监控中允许 Open VibeKey Dev，然后重启 Dev。仅监听 VibeKey 的旋钮键，不读取输入文字。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }.padding(6)
-            }.disabled(controller.busy)
+        GroupBox("输入定位") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("固定快捷键：" + controller.focusShortcutDisplay).font(.headline)
+                Text("在 Codex 中将此组合绑定到“聚焦主聊天输入框”。监听随启动自动准备，授权集中在首次使用流程。")
+                Text(controller.physicalRotaryStatus).font(.caption).foregroundStyle(.secondary)
+            }.padding(6)
+        }
     }
 }
 
@@ -557,9 +531,6 @@ private struct NativePagesSetupView: View {
         GroupBox("旋钮：编辑／浏览") {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Codex 当前模式：" + controller.rotaryModeLabel).fontWeight(.semibold)
-                Toggle("浏览模式启用 PageUp／PageDown", isOn: Binding(
-                    get: { controller.nativePageScrollEnabled }, set: { controller.configureNativePages($0) }))
-                    .disabled(controller.busy || controller.pageRoutingBusy)
                 Text(controller.nativePageStatus)
                 Text("启用导航期间，其他 App 旋钮始终为 ←／→。Codex 打开会话后默认浏览；单击进入编辑并聚焦输入框，再单击切回浏览。长按至少 0.65 秒并松开只返回列表，不切换编辑模式；列表仍转动选择会话。")
                 Text("单击沿用真实硬件聚焦快捷键；每次短按释放切换模式，不模拟输入。切回浏览不会自动聚焦正文；PageUp／PageDown 跟随当前焦点，若未翻页请手动点击正文。切换 App 不清除 Codex 模式，回到 Codex 后恢复。关闭导航仍恢复原键位。")

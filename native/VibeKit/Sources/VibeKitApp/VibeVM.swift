@@ -240,7 +240,7 @@ final class VibeVM: ObservableObject {
     let codexWorkflow = CodexWorkflowController()
     @Published private(set) var navigationOwnsHardware = false
     private var navigationJournal: NavigationCaptureJournal?
-    @Published private(set) var navigationStartupEnabled = VibeVM.migratedDefaults.bool(forKey: NavigationStartupGate.preferenceKey)
+    @Published private(set) var navigationStartupEnabled = WorkflowDefaults.automaticNavigation
     private var navigationStartupGate = NavigationStartupGate()
     private var navigationStartupRecoverySeen = false
     private var navigationStartupStateVerified = false
@@ -671,7 +671,7 @@ final class VibeVM: ObservableObject {
     }
 
     func applyShortcut(_ i: Int) {
-        guard !navigationOwnsHardware else { return }
+        guard WorkflowDefaults.canEdit(slot: buttons[i].id, navigationOwnsHardware: navigationOwnsHardware) else { return }
         guard let d = dev, let idx = VibeKitDevice.keyIndex(buttons[i].id) else { return }
         dropAppBinding(buttons[i].id)   // 三者互斥：改成快捷键/媒体键就不再是「打开 App」
         if let f = mediaFuncIndex(buttons[i].mainKey) {
@@ -747,6 +747,12 @@ final class VibeVM: ObservableObject {
 
     // MARK: 本地配置存档（Profile）
     init() {
+        if CommandLine.arguments.contains("--workspace-preview") {
+            connected = true; linkPresent = true; sn = "预览设备"; firmware = "4.6.3"; battery = "70%"; batteryPercent = 70
+            buttons[0].current = "右⌘"; buttons[1].current = "⏎"
+            navigationOwnsHardware = true; codexWorkflow.ready = true; codexWorkflow.message = "设备已就绪，原键位已保存。"
+            return
+        }
         defaults.removeObject(forKey: NavigationStartupGate.successPIDKey)
         if dialRestore != nil {
             navigationStartupRecoverySeen = true
@@ -1123,7 +1129,7 @@ final class VibeVM: ObservableObject {
         }
     }
     func clearShortcut(_ i: Int) {
-        guard !navigationOwnsHardware else { return }
+        guard WorkflowDefaults.canEdit(slot: buttons[i].id, navigationOwnsHardware: navigationOwnsHardware) else { return }
         guard let d = dev, let idx = VibeKitDevice.keyIndex(buttons[i].id) else { return }
         dropAppBinding(buttons[i].id)
         mediaFunc[buttons[i].id] = nil; persistMediaFunc()
@@ -1143,7 +1149,7 @@ final class VibeVM: ObservableObject {
     /// 给某槽绑定「打开 App」。返回 false = 哨兵池耗尽（已写 sentinelNotice）。
     @discardableResult
     func bindApp(slot: String, bundleID: String, displayName: String, action: HostAction? = nil) -> Bool {
-        guard !navigationOwnsHardware else { return false }
+        guard WorkflowDefaults.canEdit(slot: slot, navigationOwnsHardware: navigationOwnsHardware) else { return false }
         guard action == nil || slot == "dialP" else { return false }
         guard APP_BINDABLE_SLOTS.contains(slot), let idx = slotIndex(slot) else { return false }
         // 不在这里提前 unregister(slot)：taken 本就排除了本槽自己，
@@ -1183,7 +1189,7 @@ final class VibeVM: ObservableObject {
 
     /// 解绑：注销热键 + 清本地记账 + 清空设备该槽。
     func unbindApp(slot: String) {
-        guard !navigationOwnsHardware else { return }
+        guard WorkflowDefaults.canEdit(slot: slot, navigationOwnsHardware: navigationOwnsHardware) else { return }
         guard appBindings[slot] != nil else { return }
         dropAppBinding(slot)
         if let d = dev, let idx = slotIndex(slot), slot != "dialP" || (!dialDoubleClickEnabled && dialRestore == nil) {
@@ -1758,7 +1764,10 @@ extension VibeVM {
         }
         RunLoop.main.add(timer, forMode: .common)
         dialPermissionTimer = timer
-        PermissionCenter.shared.authorizationReady = { [weak self] in self?.resumeDialAfterAuthorization() }
+        PermissionCenter.shared.authorizationReady = { [weak self] in
+            self?.resumeDialAfterAuthorization()
+            self?.attemptNavigationStartup()
+        }
         PermissionCenter.shared.start()
     }
 
@@ -1831,7 +1840,8 @@ extension VibeVM {
             _ = physicalRotaryMonitor.start(mainKey: slot.capture.mainKey)
             return true
         case .captured:
-            physicalRotaryMonitor.stop()
+            if codexWorkflow.ready { _ = physicalRotaryMonitor.start(mainKey: slot.capture.mainKey) }
+            else { physicalRotaryMonitor.stop() }
             return false
         case .captureFailed:
             physicalRotaryMonitor.stop()
@@ -1909,6 +1919,10 @@ extension VibeVM {
             if remember { persistNavigationStartup(false) }
             restoreCodexNavigation { [weak self] ok in if ok { self?.syncDialGesture() } }
             return
+        }
+        guard CommandLine.arguments.contains("--navigation-hardware-check") || PermissionCenter.shared.navigationReady else {
+            codexWorkflow.message = "请先完成首次权限准备。"
+            PermissionCenter.shared.presentIfNeeded(); return
         }
         guard !navigationOwnsHardware, !codexWorkflow.busy, !dialGestureBusy, !applyingProfile,
               !quitting, connected, slotsHydrated, let device = dev else {
@@ -2095,10 +2109,14 @@ extension VibeVM {
         let ready = connected && slotsHydrated && navigationStartupStateVerified && !applyingProfile &&
             !dialGestureBusy && !quitting && !codexWorkflow.busy && !navigationOwnsHardware &&
             !codexWorkflow.hasRecovery && navigationJournal == nil && !navigationRecoveryCorrupt
-        if navigationStartupGate.take(enabled: navigationStartupEnabled, deviceReady: ready,
+        if navigationStartupRecoverySeen, ready, navigationStartupEnabled, dialRestore == nil {
+            navigationStartupRecoverySeen = false
+            navigationStartupGate = NavigationStartupGate()
+        }
+        if navigationStartupGate.take(enabled: navigationStartupEnabled, deviceReady: ready && PermissionCenter.shared.navigationReady,
             recoverySeen: navigationStartupRecoverySeen,
             diagnostic: CommandLine.arguments.contains("--navigation-hardware-check")) {
-            codexWorkflow.message = "正在按上次开启状态自动启用硬件导航…"
+            codexWorkflow.message = "正在自动准备旋钮与会话导航…"
             setCodexNavigationEnabled(true, rememberChoice: false)
         }
     }

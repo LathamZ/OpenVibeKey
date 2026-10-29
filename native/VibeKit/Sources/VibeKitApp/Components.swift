@@ -272,11 +272,10 @@ struct Card<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
             .strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.07), lineWidth: selected ? 2 : 1))
-        .shadow(color: selected ? Color.accentColor.opacity(0.25) : .black.opacity(0.10),
-                radius: selected ? 14 : 12, x: 0, y: 6)
+
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selected)
     }
 }

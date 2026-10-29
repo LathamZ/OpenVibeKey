@@ -17,7 +17,15 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
 
     static func requestRestart() {
         restartRequested = true
-        NSApp.terminate(nil)
+        scheduleTermination()
+    }
+    static func requestQuit() {
+        restartRequested = false
+        scheduleTermination()
+    }
+    private static func scheduleTermination() {
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { NSApp.terminate(nil) }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

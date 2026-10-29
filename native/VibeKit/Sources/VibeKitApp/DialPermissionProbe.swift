@@ -5,6 +5,7 @@ import ApplicationServices
 /// This handles systems where the running process keeps an outdated permission result.
 final class DialPermissionProbe {
     static let argument = "--check-dial-accessibility"
+    static let inputMonitoringArgument = "--check-input-monitoring-permission"
     static let microphoneArgument = "--check-microphone-permission"
     private var process: Process?
 

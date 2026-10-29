@@ -7,7 +7,7 @@ import VibeKitHost
 private final class NavigationStartupCheck {
     let vm = VibeVM()
     let outputPath: String
-    let initiallyEnabled = UserDefaults.standard.bool(forKey: NavigationStartupGate.preferenceKey)
+    let initiallyEnabled = true
     let started = ProcessInfo.processInfo.systemUptime
     var timer: Timer?
     var phase = "startup"

@@ -7,6 +7,7 @@ import SwiftUI
 import AppKit
 import VibeKitCore
 import VibeKitAudio
+import VibeKitHost
 
 // MARK: - 主界面
 
@@ -30,92 +31,26 @@ struct ContentView: View {
     @State private var debugUnlocked = false
 
     var body: some View {
-        ZStack {
-            // 背景：柔和渐变 + 一层低透明度毛玻璃，让设备图直接浮在其上。
-            LinearGradient(colors: [Color.accentColor.opacity(0.14), Color(nsColor: .windowBackgroundColor)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-                .ignoresSafeArea()
-            Rectangle().fill(.ultraThinMaterial).opacity(0.35).ignoresSafeArea()
-
-            VStack(spacing: 16) {
-                header.disabled(vm.navigationOwnsHardware)
-                HStack {
-                    Button("Codex 会话导航…") {
-                        openWindow(id: "codex-navigation")
-                        NSApp.activate(ignoringOtherApps: true)
-                    }
+        WorkspaceShell(vm: vm, preview: CommandLine.arguments.contains("--workspace-preview")) {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                sentinelNoticeBanner
+                if !vm.connected { offlineAppBindingsCard }
+                if vm.connected {
                     if vm.navigationOwnsHardware {
-                        Text("导航正在接管旋钮和底部键；恢复原键位后可编辑配置。")
+                        Label("旋钮与底部键正用于导航；其他按键、灯光和声音仍可调整。", systemImage: "info.circle")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    Spacer()
-                }
-                // 哨兵提示与离线绑定区块都必须在**所有**连接状态下渲染。
-                // 主机侧热键的寿命跟的是进程，不是设备：设备离线时那几个 ⌃⌥⌘F9 照样被本
-                // 进程全局吃掉。早先这两样都埋在只有 vm.connected 才渲染的快捷键卡里，
-                // 于是设备一离线（或厂商口被 CLI 抢了导致误判离线），用户既看不到
-                // 「找不到该 App」这类只有离线才会触发的提示，也没有任何办法解绑——只能退 App。
-                sentinelNoticeBanner.disabled(vm.navigationOwnsHardware)
-                if !vm.connected { offlineAppBindingsCard.disabled(vm.navigationOwnsHardware) }
-                if vm.connected {
                     HStack(alignment: .top, spacing: 16) {
-                        deviceColumn(showHint: true)
                         shortcutsCard.frame(maxWidth: .infinity)
-                        VStack(spacing: 14) { ledCard; micTuneCard; micCard }.frame(width: language.resolved == .english ? 300 : 264)
+                        VStack(spacing: 14) { ledCard; micTuneCard; micCard }.frame(width: 265)
                     }
-                    .disabled(vm.navigationOwnsHardware)
-                    .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97, anchor: .top)),
-                                            removal: .opacity))
-                } else if vm.linkPresent {
-                    // 连接器在位但 AU05 未开机：等待态，心跳持续探测，开机后自动加载。
-                    HStack(alignment: .top, spacing: 16) {
-                        deviceColumn(showHint: false)
-                        waitingForDevice.frame(maxWidth: .infinity)
-                    }
-                    .transition(.opacity)
-                } else {
-                    HStack(alignment: .top, spacing: 16) {
-                        deviceColumn(showHint: false)
-                        disconnected.frame(maxWidth: .infinity)
-                    }
-                    .transition(.opacity)
-                }
-            }
-            .padding(20)
-            .frame(width: language.resolved == .english ? 1020 : 900, alignment: .top)   // 固定内容宽度；高度随内容
-        }
-        .coordinateSpace(name: "root")
-        .overlayPreferenceValue(AnchorFrames.self) { frames in
-            // 旋钮 + 三个按键各一条灰线，指向对应标签；竖直段从上到下依次右移，
-            // 分层（第一/二/三/四层）、互不重合、互不相交。
-            if vm.connected, let imgF = frames["devimg"] {
-                // 竖直段只能落在「设备图右缘 → 目标标签左侧」这条走廊里，而走廊只有三十几点宽。
-                // 早先四条 lane 写死成 +0/+16/+38/+66，最右那两条超出走廊，被 ConnectorOverlay
-                // 里那道 `min(…, end.x - 6)` 一起夹到同一个 x —— btn1 与 btn2 的竖直段完全重合，
-                // 看起来是一条从「按钮 1」直通「按钮 2」的长线。改成按走廊实际宽度均分：
-                // 间距随布局自适应，钳位退回成兜底，不会再把两条夹成一条。
-                let laneOrder = ["dial", "btn3", "btn2", "btn1"]   // 从左到右；源越靠上，lane 越靠右
-                let left = imgF.maxX + 6
-                // 右界只看三个按钮标签——它们的 lane 最靠右，走廊由它们定。旋钮 lane 在最左，
-                // 不该被「旋钮」标签自己的位置拖着一起收窄。
-                let btnMinX = ["btn1", "btn2", "btn3"].compactMap { frames["label:\($0)"]?.minX }.min()
-                let right = max((btnMinX ?? left + 60) - 12, left + 24)
-                let step = (right - left) / CGFloat(laneOrder.count - 1)
-                ForEach(["dial", "btn1", "btn2", "btn3"], id: \.self) { id in
-                    if let fromBox = DeviceGeom.rect(id, in: imgF),
-                       let to = frames["label:\(id)"],
-                       let lane = laneOrder.firstIndex(of: id) {
-                        ConnectorOverlay(from: fromBox, to: to, laneX: left + step * CGFloat(lane))
-                    }
-                }
+                } else if vm.linkPresent { waitingForDevice }
+                else { disconnected }
             }
         }
         .preferredColorScheme(vm.colorScheme)
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: vm.connected)
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: vm.linkPresent)
-        // LSUIElement 应用关窗后整个 App 在 Dock/⌘Tab 里完全隐形，用户无法再回到窗口点"停止"，
-        // 所以电平表必须在窗口消失时自己停，否则 AVAudioEngine 和麦克风占用会一直挂着退不掉。
-        .onAppear { PermissionCenter.shared.presentIfNeeded() }
+        .onAppear { if !CommandLine.arguments.contains("--workspace-preview") { PermissionCenter.shared.presentIfNeeded() } }
         .onDisappear { mic.stop() }
     }
 
@@ -131,10 +66,7 @@ struct ContentView: View {
     var header: some View {
         VStack(spacing: 8) {
             HStack(spacing: 12) {
-                Image(systemName: "dial.medium.fill")
-                    .font(.system(size: 26)).foregroundStyle(Color.accentColor)
-                    .shadow(color: Color.accentColor.opacity(0.4), radius: 6)
-                Text("Open VibeKey").font(.system(.title2, design: .rounded).weight(.bold))
+                Text("按键与设备").font(.system(.title3, design: .rounded).weight(.semibold))
                 Spacer()
                 if vm.connected {
                     HStack(spacing: 6) {
@@ -157,13 +89,9 @@ struct ContentView: View {
                     }
                     .buttonStyle(GhostButtonStyle()).help(L("配置：点开可加载/新增；界面改动自动存到当前配置"))
                     .popover(isPresented: $showProfiles, arrowEdge: .bottom) { profilePopover }
+                    .disabled(vm.navigationOwnsHardware)
                     // 更新时间移到配置弹层内部（当前配置行 + 各配置分别显示），不再挂在按钮外面。
                 }
-                Button { vm.toggleScheme() } label: {
-                    Image(systemName: vm.colorScheme == .dark ? "sun.max.fill" : "moon.fill").font(.system(size: 15))
-                }
-                .buttonStyle(GhostButtonStyle()).help(L("切换 日间 / 夜间"))
-                LanguageMenu(compact: true)
                 GitHubLink()
             }
             // 设备信息条：独立成行、右对齐，保证 SN / 固件完整显示。
@@ -171,7 +99,6 @@ struct ContentView: View {
                 HStack(spacing: 6) {
                     Spacer()
                     InfoChip(k: L("型号"), v: "AU05")
-                    InfoChip(k: "SN", v: vm.sn, mono: true)
                     InfoChip(k: L("固件"), v: vm.firmware)
                     InfoChip(k: vm.charging ? L("⚡充电") : L("电量"), v: vm.battery, danger: !vm.charging && (vm.batteryPercent ?? 100) <= 20)
                     Button {
@@ -193,12 +120,14 @@ struct ContentView: View {
                     }
                     .buttonStyle(GhostButtonStyle()).help(L("电源：待机 / 休眠 / 重启"))
                     .popover(isPresented: $showPowerPop, arrowEdge: .bottom) { powerPopover }
+                    .disabled(vm.navigationOwnsHardware)
                     // 按键自检：接收器转发通道卡死时，一切看起来都正常，只有按键出不来。
                     Button { showSelfTest.toggle() } label: {
                         Image(systemName: "stethoscope").font(.system(size: 15))
                     }
                     .buttonStyle(GhostButtonStyle()).help(L("按键自检：确认设备有没有真的发出按键"))
                     .popover(isPresented: $showSelfTest, arrowEdge: .bottom) { selfTestPopover }
+                    .disabled(vm.navigationOwnsHardware)
                 }
                 .transition(.opacity)
             }
@@ -345,8 +274,16 @@ struct ContentView: View {
     var shortcutsCard: some View {
         Card(title: L("快捷键 · 每键一个 · 离线生效"), systemImage: "keyboard") {
             VStack(spacing: 10) {
-                dialGroup
+                if vm.navigationOwnsHardware {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("由工作流管理", systemImage: "dial.medium").font(.headline)
+                        Text("旋钮：左右移动、编辑／浏览与会话选择。\n底部键：退格、按住连删；列表中取消。")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.accentColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+                } else { dialGroup }
                 ForEach(vm.buttons.indices, id: \.self) { i in
+                    if !vm.navigationOwnsHardware || vm.buttons[i].id != "btn3" {
                     ShortcutEditor(b: $vm.buttons[i],
                                    onApply: { vm.applyShortcut(i) },
                                    onClear: { vm.clearShortcut(i) },
@@ -355,6 +292,8 @@ struct ContentView: View {
                                    },
                                    onUnbindApp: { vm.unbindApp(slot: vm.buttons[i].id) })
                     .equatable()
+                    .disabled(!WorkflowDefaults.canEdit(slot: vm.buttons[i].id, navigationOwnsHardware: vm.navigationOwnsHardware))
+                    }
                 }
             }
         }

@@ -285,5 +285,25 @@ do {
  check("key held at startup cannot toggle",h.action(down:false,at:2,eligible:true) == nil)
 }
 
+// Unified onboarding and capability-gated app expansion.
+do {
+ for accessibility in [false,true] { for monitor in [false,true] { for mic in [false,true] { for notice in [false,true] {
+  check("complete permission status is accurate", WorkflowDefaults.permissionsReady(accessibility:accessibility,inputMonitoring:monitor,microphone:mic,notifications:notice) == (accessibility && monitor && mic && notice))
+  check("navigation depends only on required permissions", WorkflowDefaults.navigationPermissionsReady(accessibility:accessibility,inputMonitoring:monitor) == (accessibility && monitor))
+ }}}}
+ for id in ["btn1","btn2","btn3","dialP","dialL","dialR"] {
+  check("owned slots alone are protected",WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:true) == ["btn1","btn2"].contains(id))
+  check("paused navigation permits manual key editing",WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:false))
+ }
+ check("catalog has five distinct applications",WorkflowCatalog.targets.count == 5 && Set(WorkflowCatalog.targets.map(\.id)).count == 5)
+ check("Codex retains real session capability",WorkflowCatalog.supports(.conversations,in:.codex))
+ for id in WorkflowTargetID.allCases where id != .codex {
+  check("planned adapter is never treated as integrated",!WorkflowCatalog.target(id).integrated)
+  for capability in WorkflowCapability.allCases { check("planned adapter cannot dispatch a capability",!WorkflowCatalog.supports(capability,in:id)) }
+ }
+ check("WeChat has no invented task-stop capability",!WorkflowCatalog.supports(.stopTask,in:.weChat))
+ check("Codex resume is not falsely advertised",!WorkflowCatalog.supports(.resumeTask,in:.codex))
+}
+
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
 exit(failures == 0 ? 0 : 1)

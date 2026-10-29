@@ -124,7 +124,7 @@ struct MiniPanel: View {
                     NSApp.activate(ignoringOtherApps: true)
                     dismiss()
                 }
-                menuRow(icon: "power", title: L("退出 Open VibeKey")) { NSApp.terminate(nil) }
+                menuRow(icon: "power", title: L("退出 Open VibeKey")) { AppLifecycle.requestQuit() }
             }
         }
         .padding(12).frame(width: 288)

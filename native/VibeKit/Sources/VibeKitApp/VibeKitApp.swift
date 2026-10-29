@@ -6,6 +6,7 @@ import VibeKitCore
 import VibeKitAudio
 import ApplicationServices
 import AVFoundation
+import IOKit.hid
 
 @main
 struct VibeKitApp: App {
@@ -16,6 +17,17 @@ struct VibeKitApp: App {
 
     init() {
         // @StateObject initializers are lazy. Exit before body/VM/device setup in probe mode.
+        if let index = CommandLine.arguments.firstIndex(of: "--workspace-preview"), index + 1 < CommandLine.arguments.count {
+            runWorkspacePreview()
+            exit(0)
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--termination-self-test"), index + 1 < CommandLine.arguments.count {
+            runTerminationSelfTest(outputPath: CommandLine.arguments[index + 1])
+            exit(1)
+        }
+        if CommandLine.arguments.contains(DialPermissionProbe.inputMonitoringArgument) {
+            exit(IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted ? 0 : 1)
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--navigation-startup-check"), index + 1 < CommandLine.arguments.count {
             runNavigationStartupCheck(outputPath:CommandLine.arguments[index + 1])
             exit(1)

@@ -4,14 +4,18 @@ Upstream: [palaemonboy/OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey).
 Fork: [LathamZ/OpenVibeKey](https://github.com/LathamZ/OpenVibeKey).
 MIT license and upstream attribution are retained. This is an experimental personal fork,
 not an upstream release. The upstream README describes upstream behavior; this document
-covers the optional workflow on `feat/codex-workflow`.
+covers the experimental workflow on `feat/codex-workflow`.
+
+Current design: [multi-application workspace](ARCHITECTURE.md), lr.12. A shared interaction
+model covers Codex, DeepSeek, Hugging Face, Claude Code and WeChat; only Codex has a runtime
+integration today. Other catalog entries remain explicitly pending.
 
 ## Baseline and scope
 
 Based on upstream `c6466fd4687da612c9c52b006399f87148903727`.
 The first feature commit records one accumulated implementation snapshot, not a fabricated
 sequence of earlier commits. The first validated path is the macOS Codex desktop app;
-other applications are intentionally outside this iteration.
+other runtime adapters remain planned and must be validated one concrete path at a time.
 
 Implemented:
 
@@ -23,14 +27,18 @@ Implemented:
 - Rotary selection/open; hold then release to return to the selector; third button cancels
   the selector without opening the highlighted chat.
 - Physical focus shortcut; the user must bind `Control+Option+Command+F12` to Codex's
-  main-composer focus action and confirm it in VibeKey settings.
+  main-composer focus action. lr.12 uses this fixed shortcut without a confirmation toggle.
 - In content mode, native PageUp/PageDown rotation and physical Backspace with native repeat.
-- Remember navigation on/off on normal restart. Fresh installations default off. Normal quit
-  restores original hardware mappings while keeping intent. Recovery journals gate automatic
-  startup after an abnormal exit; failed restoration requires manual attention.
+- lr.12 prepares navigation by default after required permissions and device verification. Pause
+  restores original mappings for this run; next launch uses the default. Old recovery journals
+  are verified and restored before rearming; failed restoration requires attention.
+- Native workspace with daily actions, application adapters, device controls and permissions.
+  Only workflow-owned key slots are protected; other keys, lighting and audio remain editable.
+- First-use guidance includes Input Monitoring. Accessibility and Input Monitoring gate navigation;
+  microphone/notification permissions are optional. The workspace remains accessible when denied.
 
 Navigation temporarily changes device key assignments. Only one VibeKey application should
-control the device at a time. Use the navigation window's close/restore action before switching
+control the device at a time. Use Connection & Permissions → pause/restore before switching
 back to another controller. Local pins, preferences and recovery journals stay in UserDefaults;
 no personal session or device identifiers are seeded in public source.
 
@@ -48,8 +56,8 @@ swift run -c release VibeKitThreadListProbe
 swift run -c release VibeKitHostProbe
 ```
 
-The first two probes contain 206 navigation/startup/recovery and 92 focus/hold checks at this
-snapshot. Thread-list probes use a local Python fixture, not the real Codex account. The above
+The first two probes contain 286 navigation/startup/recovery and 92 focus/hold checks at this
+snapshot; thread fixtures contain 28 checks and packaged modifier validation contains 41. Thread-list probes use a local Python fixture, not the real Codex account. The above
 probes do not change hardware settings. Focus/host probes temporarily register and release real
 Carbon hotkeys; run them in a normal desktop session with the device controller quit to avoid
 shortcut conflicts. Sandboxed registration may fail even when pure state-machine checks pass.
@@ -120,3 +128,22 @@ Regression probes cover exclusive short/long release, cancelled/context-crossing
 keys, selector precedence, cross-app defaults and coalesced USB routing. The hardware diagnostic
 additionally reads back PageUp/PageDown, Left/Right, selector keys and original mappings. Passing
 that diagnostic does not establish the real editing/browsing workflow without operator testing.
+
+## lr.12 native preview and acceptance
+
+The app supports isolated native layout renders without initializing device IO or runtime hooks:
+
+```sh
+"dist/Open VibeKey Dev.app/Contents/MacOS/VibeKitApp" \
+  --workspace-preview "工作台" --preview-image /tmp/vibekey-workspace.png
+```
+
+Other page names: 应用适配, 设备设置, 连接与权限. Preview data is illustrative, not evidence
+of real permissions or device readiness. `--termination-self-test /tmp/vibekey-termination.json`
+checks MainActor cleanup through the real application run loop without device initialization.
+Never invoke hardware diagnostic flags as layout tests.
+
+The lr.12 native renders, 447 checks and asynchronous termination check passed locally.
+The build is ad-hoc signed; local system permission readiness and physical acceptance remain
+separate. Changed signatures can invalidate existing grants. No system permissions are granted
+by the build or UI. Direct body/answer-card focus and task resume remain unimplemented.
