@@ -190,6 +190,14 @@ Native Keychain confirmation was completed by the user and smoke signing succeed
 lr.14 packages (build21/A, build22/B) were built with different CDHashes but identical
 certificate-based designated requirements; deep validity and cross-requirement checks passed.
 Implementation is unchanged; package build metadata differs. Both passed resource/41 modifier
-checks. A is installed; its initial stable-identity TCC migration is awaiting user completion.
-B remains staged. Actual permission retention across an authorized A→B update is not yet proven;
-a denied-to-denied check is not proof of preservation.
+checks. The user completed initial A migration. A was quit normally and replaced with B without
+changing TCC or opening permission settings. Both required permissions stayed ready in B's
+own normal UI, and the fresh B PID automatically completed navigation startup. Actual local
+permission retention passed for this update; physical gestures were not retested.
+
+Important: a raw child launched from a Codex-owned shell was attributed by TCC to Codex and
+returned false. It is not a valid measurement of the normally launched VibeKey. Check actual
+app-owned PermissionCenter evidence and the matching startup-success PID. A denied-to-denied
+check is never proof of preservation.
+
+Multiple-project naming and public distribution proposal: [SIGNING.md](SIGNING.md).
