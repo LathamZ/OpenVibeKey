@@ -2167,7 +2167,7 @@ extension VibeVM {
             ready: true, contentSelected: wantedContent && codexWorkflow.navigation.stage == .openRequested &&
                 !navigationDial.isHeld && navigationRotationHeld.isEmpty,
             frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-            selectorVisible: codexWorkflow.navigation.stage == .choosing, editing: codexWorkflow.rotaryEditing)
+            selectorVisible: codexWorkflow.navigation.stage == .choosing, editing: codexWorkflow.rotaryEditing, contentBundleID: codexWorkflow.contentBundleID)
         if let operation = nativePageRoute.request(mode) { startNativePageRouting(operation) }
     }
     private func startNativePageRouting(_ operation: NativePageRouteState.Operation) {

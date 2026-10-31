@@ -16,11 +16,22 @@ private final class SessionWheelPanel: NSPanel {
 @MainActor
 final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var navigation = CodexNavigation()
-    /// Live sessions currently come from the Codex adapter only. Other colors are fixture-previewable.
+    private let deepSeekAdapter = DesktopAccessibilityAdapter(target: .deepSeek)
+    private let claudeAdapter = DesktopAccessibilityAdapter(target: .claudeCode)
+    @Published private(set) var activeTarget: WorkflowTargetID = .codex
+    @Published private(set) var adapterSessions: [CodexSession] = []
+    var contentBundleID: String { activeTarget.bundleID ?? "" }
+    func selectTarget(_ target: WorkflowTargetID) {
+        guard target != .weChat, target != activeTarget else { return }
+        suspend(message: ""); activeTarget = target; adapterSessions = []; refreshError = nil
+        navigation.reset(); refreshPhysicalFocusRoute()
+    }
+    func enter(target: WorkflowTargetID) { selectTarget(target); enter(inferForeground: false) }
+    /// The same selector renders target-specific sessions; fixture colors remain previewable.
     var selectorTarget: WorkflowTargetID {
         guard preview, let index = CommandLine.arguments.firstIndex(of: "--preview-workflow"),
               index + 1 < CommandLine.arguments.count,
-              let target = WorkflowTargetID(rawValue: CommandLine.arguments[index + 1]) else { return .codex }
+              let target = WorkflowTargetID(rawValue: CommandLine.arguments[index + 1]) else { return activeTarget }
         return target
     }
     var selectorHaloHex: String { WorkflowCatalog.target(selectorTarget).haloHex }
@@ -33,11 +44,11 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     @Published var listStatus = "打开选择面板时会自动读取本机未归档会话。"
     private var refreshGeneration = UUID()
     private var listTask: Task<CodexThreadListing, Error>?
-    var sessions: [CodexSession] { CodexSessionCatalog.merge(pinned: pinnedSessions, recent: recentThreads) }
+    var sessions: [CodexSession] { activeTarget == .codex ? CodexSessionCatalog.merge(pinned: pinnedSessions, recent: recentThreads) : adapterSessions }
     var projectNames: [String: String] { Dictionary(recentThreads.map { ($0.session.id, $0.project) }, uniquingKeysWith: { first, _ in first }) }
     var filteredSessions: [CodexSession] { CodexSessionCatalog.filter(sessions, query: selectorQuery, projects: projectNames) }
     func isPinned(_ id: String) -> Bool { pinnedSessions.contains { $0.id == id } }
-    func project(_ id: String) -> String { projectNames[id] ?? "固定会话" }
+    func project(_ id: String) -> String { activeTarget == .codex ? projectNames[id] ?? "固定会话" : WorkflowCatalog.target(activeTarget).name }
     @Published private(set) var wheelPosition = 0.0
     @Published private(set) var wheelSnapping = false
     @Published private(set) var wheelStepsPerItem = 3.0
@@ -84,7 +95,14 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     var wheelPageCount: Int { SessionWheelPaging.pageCount(navigation.candidates.count) }
     var wheelRange: Range<Int> { SessionWheelPaging.range(selection: navigation.selection, count: navigation.candidates.count) }
     var wheelSessions: [CodexSession] {
-        SessionWheelPaging.ordered(filteredSessions, activity: Dictionary(recentThreads.map { ($0.session.id, Double($0.updatedAt)) }, uniquingKeysWith: max), opened: localOpened)
+        let activity = activeTarget == .codex
+            ? Dictionary(recentThreads.map { ($0.session.id, Double($0.updatedAt)) }, uniquingKeysWith: max)
+            : Dictionary(adapterSessions.enumerated().map { ($0.element.id, Double(adapterSessions.count - $0.offset)) }, uniquingKeysWith: max)
+        return SessionWheelPaging.ordered(filteredSessions, activity: activity, opened: localOpened)
+    }
+    private func recordOpened(_ session: CodexSession) {
+        localOpened[session.id] = Date().timeIntervalSince1970
+        if let data = try? JSONEncoder().encode(localOpened) { defaults.set(data, forKey: openedKey) }
     }
     func colorHex(_ id: String) -> String { colorLedger.colors[id] ?? SessionColorLedger.palette[0] }
     func setColor(id: String, hex: String) {
@@ -139,8 +157,12 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     func toggleRotaryMode() {
         guard ready, !busy, !pageRoutingBusy,
               navigation.stage == .openRequested,
-              NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex" else { return }
+              NSWorkspace.shared.frontmostApplication?.bundleIdentifier == contentBundleID else { return }
         rotaryEditing.toggle()
+        if activeTarget != .codex, rotaryEditing {
+            do { try (activeTarget == .deepSeek ? deepSeekAdapter : claudeAdapter).focusComposer() }
+            catch { rotaryEditing = false; message = error.localizedDescription }
+        }
         refreshPhysicalFocusRoute()
         // Silent mode switch; guidance lives in the dedicated help page.
     }
@@ -159,7 +181,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         if let data = defaults.data(forKey: sessionKey) {
             let saved = (try? JSONDecoder().decode([CodexSession].self, from: data)) ?? []
             var seen = Set<String>()
-            self.pinnedSessions = saved.filter { $0.isValid && seen.insert($0.id).inserted }
+            self.pinnedSessions = saved.filter { $0.target == .codex && $0.isValid && seen.insert($0.id).inserted }
         } else {
             self.pinnedSessions = []
         }
@@ -185,7 +207,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 Task { @MainActor [weak self] in
                     guard let self, self.ready else { return }
                     self.cancelPhysicalRotaryGesture?()
-                    if app.bundleIdentifier == "com.openai.codex" {
+                    if app.bundleIdentifier == self.contentBundleID {
                         self.refreshPhysicalFocusRoute(); return
                     }
                     if app.processIdentifier == ProcessInfo.processInfo.processIdentifier {
@@ -223,6 +245,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         nativeFocusActive = routePhysicalFocus?(false) ?? false
     }
     func addSession(reference: String, title: String) -> Bool {
+        guard activeTarget == .codex else { return false }
         guard navigation.stage != .choosing, navigation.stage != .opening else {
             message = "请先关闭会话选择面板再编辑列表。"; return false
         }
@@ -232,6 +255,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         pinnedSessions.append(session); ensureColors(); persist(); return true
     }
     func removeSession(id: String) {
+        guard activeTarget == .codex else { return }
         guard navigation.stage != .choosing, navigation.stage != .opening else { return }
         pinnedSessions.removeAll { $0.id == id }; persist()
     }
@@ -240,6 +264,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         defaults.set(data, forKey: sessionKey)
     }
     func pinSession(id: String) {
+        guard activeTarget == .codex else { return }
         guard navigation.stage != .choosing, navigation.stage != .opening, !isPinned(id), let session = sessions.first(where: { $0.id == id }) else { return }
         pinnedSessions.append(session); persist()
     }
@@ -251,6 +276,16 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     func refreshSessions(replaceSelector: Bool = false) {
         guard !preview else { return }
         let selection = navigation.selected?.id
+        if activeTarget == .deepSeek || activeTarget == .claudeCode {
+            cancelRefresh(); refreshError = nil
+            do {
+                adapterSessions = try activeTarget == .deepSeek ? deepSeekAdapter.list() : claudeAdapter.list()
+                ensureColors(); listStatus = activeTarget == .deepSeek ? deepSeekAdapter.status : "Claude App 已连接，列出 Code 会话。"
+            }
+            catch { adapterSessions = []; listStatus = error.localizedDescription; refreshError = listStatus }
+            if replaceSelector, navigation.stage == .choosing { enterWheel(preferredID: selection) }
+            return
+        }
         cancelRefresh()
         let generation = UUID(); refreshGeneration = generation
         refreshing = true; selectorLoading = replaceSelector; refreshError = nil
@@ -288,8 +323,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         cancelPendingGestures?()
         enterWheel(preferredID: navigation.selected?.id)
     }
-    func enter() {
+    func enter(inferForeground: Bool = true) {
         guard ready || preview else { message = "请先连接设备并启用导航模式。"; return }
+        if inferForeground, !preview, let target = [WorkflowTargetID.codex, .deepSeek, .claudeCode].first(where: { $0.bundleID == NSWorkspace.shared.frontmostApplication?.bundleIdentifier }) { selectTarget(target) }
         selectorGeneration = UUID()
         cancelPendingGestures?(); selectorQuery = ""; enterWheel()
         captureRotaryForNavigation()
@@ -373,7 +409,27 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
             navigation.dispatched(request: request, session: session, accepted: true)
             message = "预览：已模拟打开请求，没有启动或控制 Codex。"; return
         }
-        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex"),
+        if activeTarget != .codex {
+            let target = activeTarget
+            let adapter = target == .deepSeek ? deepSeekAdapter : claudeAdapter
+            do {
+                try adapter.open(session)
+                navigation.dispatched(request: request, session: session, accepted: true)
+                recordOpened(session)
+                rotaryEditing = true; refreshPhysicalFocusRoute()
+                // Electron renders the newly selected composer asynchronously; never write text.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    guard let self, self.activeTarget == target, self.navigation.lastRequestedID == session.id, self.navigation.stage == .openRequested else { return }
+                    do { try adapter.focusComposer(); self.message = "输入框已聚焦。" }
+                    catch { self.message = error.localizedDescription }
+                }
+            } catch {
+                navigation.dispatched(request: request, session: session, accepted: false)
+                message = error.localizedDescription; refreshError = message; present()
+            }
+            return
+        }
+        guard session.target == .codex, let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex"),
               Bundle(url: appURL)?.bundleIdentifier == "com.openai.codex" else {
             navigation.dispatched(request: request, session: session, accepted: false)
             message = "未找到当前 Codex 应用。"; present(); return

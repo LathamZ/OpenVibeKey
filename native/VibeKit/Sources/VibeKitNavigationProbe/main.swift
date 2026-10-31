@@ -297,7 +297,7 @@ do {
  }
  check("catalog restores Claude Code alongside existing targets",WorkflowCatalog.targets.count == 4 && Set(WorkflowCatalog.targets.map(\.id)) == Set([.codex, .deepSeek, .claudeCode, .weChat]))
  check("Codex retains real session capability",WorkflowCatalog.supports(.conversations,in:.codex))
- for id in WorkflowTargetID.allCases where id != .codex {
+ for id in [WorkflowTargetID.weChat] {
   check("planned adapter is never treated as integrated",!WorkflowCatalog.target(id).integrated)
   for capability in WorkflowCapability.allCases { check("planned adapter cannot dispatch a capability",!WorkflowCatalog.supports(capability,in:id)) }
  }
@@ -518,13 +518,35 @@ do {
     check("Codex has white selection light", WorkflowCatalog.target(.codex).haloHex == "FFFFFF")
     check("DeepSeek uses official homepage blue", WorkflowCatalog.target(.deepSeek).haloHex == "4176E6")
     check("Claude uses official Claude orange", WorkflowCatalog.target(.claudeCode).haloHex == "D97757")
-    check("Claude remains a planned terminal adapter", WorkflowCatalog.target(.claudeCode).transport == .terminal && !WorkflowCatalog.target(.claudeCode).integrated)
+    check("Claude uses its desktop app", WorkflowCatalog.target(.claudeCode).transport == .native && WorkflowCatalog.target(.claudeCode).integrated)
     check("halo extends 20 percent of the short edge", abs(SessionOrbit.haloExtent(width: 208, height: 86) - 17.2) < 0.001)
     check("halo invalid geometry stays empty", SessionOrbit.haloExtent(width: .nan, height: 86) == 0 && SessionOrbit.haloExtent(width: -2, height: 86) == 0)
     check("halo ends in transparency", SessionOrbit.haloOpacity(progress: 1) == 0 && SessionOrbit.haloOpacity(progress: .infinity) == 0)
     var fade = true
     for i in 0..<100 { fade = fade && SessionOrbit.haloOpacity(progress: Double(i)/100) > SessionOrbit.haloOpacity(progress: Double(i+1)/100) }
     check("halo fades continuously outwards", fade)
+}
+
+do {
+    let id = "00000000-0000-0000-0000-000000000001"
+    let old = Data("{\"id\":\"\(id)\",\"title\":\"Existing pin\"}".utf8)
+    let pin = try! JSONDecoder().decode(CodexSession.self, from: old)
+    check("legacy pin remains Codex", pin.target == .codex && pin.isValid)
+    let foreign = CodexSession(adapterReference: id, title: "Sidebar chat", target: .deepSeek)!
+    let roundtrip = try! JSONDecoder().decode(CodexSession.self, from: JSONEncoder().encode(foreign))
+    check("external session preserves target through coding", roundtrip == foreign && roundtrip.target == .deepSeek)
+    check("Claude desktop has a separate target", CodexSession(adapterReference: id, title: "reviewer", target: .claudeCode)?.target == .claudeCode)
+    check("WeChat is outside external adapter scope", CodexSession(adapterReference: id, title: "Chat", target: .weChat) == nil)
+    check("external handle is strictly UUID", CodexSession(adapterReference: "../arbitrary", title: "Chat", target: .deepSeek) == nil)
+    check("foreign IDs never enter Codex reference parser", CodexSession(reference: "dsh://open", title: "Chat") == nil)
+    check("DeepSeek content pages are explicitly target-scoped", NativePageScroll.desired(enabled: true, ready: true, contentSelected: true, frontmostBundleID: "com.deepseek.dsh", contentBundleID: "com.deepseek.dsh") == .pages)
+    check("foreign foreground cannot inherit DeepSeek pages", NativePageScroll.desired(enabled: true, ready: true, contentSelected: true, frontmostBundleID: "com.openai.codex", contentBundleID: "com.deepseek.dsh") == .arrows)
+    check("DeepSeek edit uses physical arrows", NativePageScroll.desired(enabled: true, ready: true, contentSelected: true, frontmostBundleID: "com.deepseek.dsh", editing: true, contentBundleID: "com.deepseek.dsh") == .arrows)
+    for target in [WorkflowTargetID.deepSeek, .claudeCode] {
+        check("desktop adapter advertises verified list/open/focus", WorkflowCatalog.supports(.conversations, in: target) && WorkflowCatalog.supports(.openConversation, in: target) && WorkflowCatalog.supports(.focusComposer, in: target))
+        check("desktop adapter does not invent stop/resume", !WorkflowCatalog.supports(.stopTask, in: target) && !WorkflowCatalog.supports(.resumeTask, in: target))
+    }
+    check("Codex focus shortcut never leaks to DeepSeek", NativeFocusShortcut.route(configured: true, navigationReady: true, contentSelected: true, frontmostBundleID: "com.deepseek.dsh", rotaryHeld: false) == .captureForNavigation)
 }
 
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")

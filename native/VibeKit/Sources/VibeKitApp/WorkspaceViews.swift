@@ -103,8 +103,13 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                         Text("日常转动是左右移动；进入已适配的会话后，用同一套手势编辑、浏览和切换。")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 10) {
-                            Button("选择会话") { if !preview { controller.enter() } }.buttonStyle(.borderedProminent).disabled(!preview && !controller.ready)
-                            Button("管理会话") { if !preview { openWindow(id: "session-management") } }.buttonStyle(.bordered)
+                            Button("选择会话") { if !preview { controller.enter(inferForeground: false) } }.buttonStyle(.borderedProminent).disabled(!preview && !controller.ready)
+                            Menu(WorkflowCatalog.target(controller.activeTarget).name) {
+                                Button("Codex") { if !preview { controller.selectTarget(.codex) } }
+                                Button("DeepSeek Harness") { if !preview { controller.selectTarget(.deepSeek) } }
+                                Button("Claude Code") { if !preview { controller.selectTarget(.claudeCode) } }
+                            }
+                            Button("管理会话") { if !preview { openWindow(id: "session-management") } }.buttonStyle(.bordered).disabled(controller.activeTarget != .codex)
                         }
                     }
                 }
@@ -117,7 +122,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                         actionRow("会话内短按", "编辑 ⇄ 浏览")
                         actionRow("长按后松开", "选择会话")
                         Divider()
-                        Label("Codex · " + controller.rotaryModeLabel, systemImage: controller.rotaryEditing ? "text.cursor" : "doc.text")
+                        Label(WorkflowCatalog.target(controller.activeTarget).name + " · " + controller.rotaryModeLabel, systemImage: controller.rotaryEditing ? "text.cursor" : "doc.text")
                             .font(.callout).foregroundStyle(Color.accentColor)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -137,7 +142,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("应用适配").font(.headline)
-                        Text("Codex 已接入，更多应用沿用同一套交互。") .font(.callout).foregroundStyle(.secondary)
+                        Text("Codex、DeepSeek Harness 与 Claude App Code 已接入。") .font(.callout).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button("查看全部") { page = .applications }.buttonStyle(.borderless)
@@ -177,8 +182,13 @@ struct WorkspaceShell<DeviceSettings: View>: View {
             workspaceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(target.name).font(.title3.bold())
+                    if target.id != .weChat {
+                        Button("打开会话选择器") { if !preview { controller.enter(target: target.id) } }
+                            .disabled(!preview && !controller.ready)
+                    }
                     Text(target.detail).font(.callout)
                     Text(target.nextStep).font(.callout).foregroundStyle(.secondary)
+                    if target.id == controller.activeTarget { Text(controller.listStatus).font(.caption).foregroundStyle(.secondary) }
                     Divider()
                     Text("共同操作：选择会话 → 编辑输入 ⇄ 浏览内容 → 返回会话列表") .font(.callout)
                     Text("每个应用只提供已经验证的能力；停止、继续和提交不做通用猜测。") .font(.caption).foregroundStyle(.secondary)
@@ -212,7 +222,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                 Text("外观与手感").font(.headline)
                 Text("到“设备设置”调整每项需要的旋转格数和局部玻璃浓度。颜色按会话保存，可右键卡片选择，或在“管理会话”中自定义。")
                     .font(.callout).foregroundStyle(.secondary)
-                Text("本版保留已经验证的按键流程。新建、模型导航、统一停止／继续及其他应用接入仍按评审方案推进。")
+                Text("本版适配 Codex、DeepSeek Harness 和 Claude App 的 Code 页面。新建、模型导航、统一停止／继续继续按评审方案推进。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

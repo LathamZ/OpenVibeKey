@@ -2,6 +2,15 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
+## 1.0.0-preview.4
+
+- Adds real DeepSeek Harness and **Claude.app Code-page** session adapters. Both enumerate the expanded native sidebar, open a selected conversation through public macOS Accessibility, and request main-composer focus without reading draft values or sending text.
+- Long rotary entry identifies the foreground target. The workbench target menu/application cards allow an explicit choice, preserved even when the menu-bar app does not become the system's frontmost app.
+- Reuses the orbit, paging, cancel, physical editing arrows and Backspace/repeat. Browsing still depends on focus; physical-device acceptance for the two new targets remains separate.
+- Device settings provide a selector-preview button for live glass/tint adjustment.
+- Codex keeps its established official interfaces. WeChat is deferred; no CLI/Herdr bridge is shipped. No new stop/resume, new-chat or model-navigation bindings are introduced.
+- Stable signing certificate, bundle identity, settings and hardware recovery journals are retained. See DESKTOP-ADAPTERS.md for exposed-sidebar and identity limits.
+
 ## 1.0.0-preview.3
 
 - The application catalog uses bundled original product icons; attribution and exact source versions are in ICON-ATTRIBUTION.md.
@@ -30,7 +39,7 @@ A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), li
 - App catalog now includes Codex, DeepSeek Harness, Claude Code and WeChat. Only the existing Codex path is integrated; the others remain pending.
 - Same internal bundle identifier and signing identity as the previous personal Dev app, preserving the configuration domain. Do not run the official app or the old Dev build concurrently.
 
-This release implements the orbit UI. It does not implement the entire v0.2 proposal. New chat creation, model/function navigation, universal stop/resume, complete regional focus and the other adapters remain design work.
+This release implements the orbit plus three concrete desktop paths. It does not implement the entire v0.2 proposal. New chat creation, model/function navigation, universal stop/resume, complete regional focus and WeChat remain design work.
 
 ## Build
 
@@ -49,7 +58,7 @@ A distribution may additionally include a public certificate directory using --p
 
 ## Controls in this release
 
-Long rotary press, then release: open selector. Rotate: move along the orbit. Short rotary press: open selected conversation. Buttons 1 (microphone) / 2 (check): previous/next page. Button 3 (cross): cancel without opening the highlight. In Codex, short rotary switches editing/browsing; physical rotary emits Left/Right or PageUp/PageDown. Button 3 retains Backspace and hardware repeat. Other applications retain default Left/Right rotation. Configure Codex's own focusMainChat shortcut to Control+Option+Command+F12.
+Long rotary press, then release: open selector. Rotate: move along the orbit. Short rotary press: open selected conversation. Buttons 1 (microphone) / 2 (check): previous/next page. Button 3 (cross): cancel without opening the highlight. In the selected Codex, DeepSeek Harness or Claude.app Code session, short rotary switches editing/browsing; physical rotary emits Left/Right or PageUp/PageDown. Button 3 retains Backspace and hardware repeat. Other applications retain default Left/Right rotation. Configure Codex's own focusMainChat shortcut to Control+Option+Command+F12.
 
 ## Verification boundary
 

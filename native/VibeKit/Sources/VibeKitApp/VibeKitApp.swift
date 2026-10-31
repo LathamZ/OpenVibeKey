@@ -3,6 +3,7 @@
 // MiniPanel/Components/Constants.swift）。
 import SwiftUI
 import VibeKitCore
+import VibeKitHost
 import VibeKitAudio
 import ApplicationServices
 import AVFoundation
@@ -16,6 +17,18 @@ struct VibeKitApp: App {
     @ObservedObject private var language = AppLanguage.shared
 
     init() {
+        if let i = CommandLine.arguments.firstIndex(of: "--desktop-adapter-check"), i + 1 < CommandLine.arguments.count {
+            let target: WorkflowTargetID = CommandLine.arguments.contains("--claude") ? .claudeCode : .deepSeek
+            let adapter = DesktopAccessibilityAdapter(target: target)
+            var report: [String: Any] = ["accessibility": AXIsProcessTrusted()]
+            do { report["count"] = try adapter.list().count; report["status"] = adapter.status }
+            catch { report["error"] = error.localizedDescription }
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+            }
+            exit(0)
+        }
+        for key in ["adapter.claudeCode.sidebarProbe", "adapter.deepSeek.lastRows"] { UserDefaults.standard.removeObject(forKey: key) }
         // @StateObject initializers are lazy. Exit before body/VM/device setup in probe mode.
         if let index = CommandLine.arguments.firstIndex(of: "--workspace-preview"), index + 1 < CommandLine.arguments.count {
             runWorkspacePreview()

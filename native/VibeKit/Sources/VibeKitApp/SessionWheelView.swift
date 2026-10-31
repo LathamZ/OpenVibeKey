@@ -161,7 +161,11 @@ struct WheelSensitivitySettings: View {
     @ObservedObject var controller: CodexWorkflowController
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("流动轨道", systemImage: "dial.medium").font(.headline)
+            HStack {
+                Label("流动轨道", systemImage: "dial.medium").font(.headline)
+                Spacer()
+                Button("预览选择器") { controller.enter(inferForeground: false) }.buttonStyle(.borderless).disabled(!controller.ready)
+            }
             HStack {
                 Text("灵敏度").font(.callout)
                 Text("稳").font(.caption).foregroundStyle(.secondary)

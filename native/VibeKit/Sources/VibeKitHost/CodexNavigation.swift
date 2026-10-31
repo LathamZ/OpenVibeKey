@@ -3,6 +3,13 @@ import Foundation
 public struct CodexSession: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let title: String
+    /// nil preserves existing Codable pins; external adapter handles never become Codex deep links.
+    public let adapterTarget: WorkflowTargetID?
+    public var target: WorkflowTargetID { adapterTarget ?? .codex }
+    public init?(adapterReference: String, title: String, target: WorkflowTargetID) {
+        guard target == .deepSeek || target == .claudeCode, let id = UUID(uuidString: adapterReference), !title.isEmpty, title.count <= 4096 else { return nil }
+        self.id = id.uuidString.lowercased(); self.title = title; self.adapterTarget = target
+    }
     public init?(reference: String, title: String, maximumTitleLength: Int = 100) {
         let text = reference.trimmingCharacters(in: .whitespacesAndNewlines)
         let candidate: String
@@ -16,10 +23,13 @@ public struct CodexSession: Codable, Equatable, Identifiable, Sendable {
         }
         let label = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !label.isEmpty, label.count <= maximumTitleLength else { return nil }
-        self.id = candidate; self.title = label
+        self.id = candidate; self.title = label; self.adapterTarget = nil
     }
     public var deepLink: URL { URL(string: "codex://threads/\(id)")! }
-    public var isValid: Bool { Self(reference: id, title: title, maximumTitleLength: 4096)?.id == id }
+    public var isValid: Bool {
+        if target == .deepSeek || target == .claudeCode { return Self(adapterReference: id, title: title, target: target)?.id == id }
+        return target == .codex && Self(reference: id, title: title, maximumTitleLength: 4096)?.id == id
+    }
 }
 
 /// No UI automation: only a supported existing-chat deep link is emitted as an effect.
