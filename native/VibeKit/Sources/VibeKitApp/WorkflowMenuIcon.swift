@@ -10,7 +10,7 @@ enum WorkflowMenuIcon {
         let outerComponents: Int
     }
     private static let cache = NSCache<NSString, NSImage>()
-    static func menuHex(_ target: WorkflowTargetID) -> String { target == .deepSeek ? "9CD9FF" : WorkflowCatalog.target(target).haloHex }
+    static func menuHex(_ target: WorkflowTargetID) -> String { target == .deepSeek ? "82C9F5" : WorkflowCatalog.target(target).haloHex }
     static func color(_ target: WorkflowTargetID) -> NSColor {
         let hex = menuHex(target)
         let value = UInt32(hex, radix: 16) ?? 0xFFFFFF

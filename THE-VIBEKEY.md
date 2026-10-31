@@ -2,10 +2,10 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 44)
+## 1.0.0-preview.5 (build 45)
 
 - Double rotary click preselects Codex → Claude → DeepSeek → WeChat (installed targets only). It changes the menu marker silently; it never launches or activates the target. Long rotary entry uses this selected target. Only confirming a conversation opens/activates its App.
-- Retains the original dial menu symbol and colors only its perimeter dots: Codex white, Claude orange, DeepSeek light sky blue (#9CD9FF), WeChat green. DeepSeek dots are enlarged 50%, others 18%; selector halos retain the original App colors.
+- Retains the original dial menu symbol and colors only its perimeter dots: Codex white, Claude orange, DeepSeek light sky blue (#82C9F5), WeChat green. DeepSeek dots are enlarged 50%, others 18%; selector halos retain the original App colors.
 - Cached sessions stay interactive during background refresh and hardware preparation. Initial positioning and selected border/halo update immediately, without an initial trip around the orbit. Tracking uses 35ms transitions, settling starts after 120ms with a 220ms spring response; these are animation settings, not measured hardware-to-screen latency.
 - DeepSeek prefers its selected sidebar row; Claude Code prefers a unique matching current heading. Codex uses the most recently confirmed/opened conversation known to VibeKey: its official interface does not expose the desktop's active conversation after manual switching. Unknown identity falls back to a known request or the recent list.
 - A cold first fetch still waits for real sessions. Desktop lists require exposed sidebars. WeChat has preselection/green identification only, with no conversation adapter.
