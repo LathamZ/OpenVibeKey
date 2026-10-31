@@ -20,7 +20,7 @@ struct SessionWheelView: View {
                     centerInformation.position(x: 500, y: 325)
                     OrbitCards(controller: controller, position: controller.wheelPosition)
                         .id(controller.wheelRange.lowerBound)
-                        .animation(reduceMotion ? nil : controller.wheelSnapping ? .spring(response: 0.40, dampingFraction: 0.82) : .easeOut(duration: 0.10), value: controller.wheelPosition)
+                        .animation(reduceMotion ? nil : controller.wheelSnapping ? .spring(response: 0.22, dampingFraction: 0.95) : .linear(duration: 0.035), value: controller.wheelPosition)
                     if controller.wheelPageCount > 1 {
                         HStack(spacing: 16) {
                             Button { controller.turnWheelPage(-1) } label: { Image(systemName: "chevron.left") }
@@ -114,7 +114,7 @@ private struct OrbitCards: View, Animatable {
                     }.clipShape(RoundedRectangle(cornerRadius: 15)).allowsHitTesting(false)
                 }
                 .overlay(RoundedRectangle(cornerRadius: 15)
-                    .strokeBorder(selected ? Color(wheelHex: controller.selectorHaloHex).opacity(0.65) : Color.white.opacity(0.18), lineWidth: selected ? 1 : 0.6))
+                    .strokeBorder(selected ? Color.white.opacity(0.90) : Color.white.opacity(0.18), lineWidth: selected ? 1.35 : 0.6))
                 .background {
                     if selected {
                         OrbitSelectionHalo(color: Color(wheelHex: controller.selectorHaloHex), width: 208, height: 86)
@@ -122,7 +122,7 @@ private struct OrbitCards: View, Animatable {
                     }
                 }
                 .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
-        }.buttonStyle(.plain).disabled(controller.selectorLoading || controller.pageRoutingBusy)
+        }.buttonStyle(.plain).animation(nil, value: selected).disabled(controller.selectorLoading)
             .help(session.title).accessibilityLabel(session.title).accessibilityValue(selected ? "已选中" : "未选中")
             .contextMenu {
                 ForEach(SessionColorLedger.palette, id: \.self) { hex in

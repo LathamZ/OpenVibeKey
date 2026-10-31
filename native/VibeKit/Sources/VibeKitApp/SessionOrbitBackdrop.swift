@@ -12,9 +12,10 @@ struct SessionOrbitBackdrop: NSViewRepresentable {
         OrbitMaterialView(card: card)
     }
     func updateNSView(_ view: OrbitMaterialView, context: Context) {
-        view.effect.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
-        view.alphaValue = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : SessionOrbit.glass(strength)
-        view.needsLayout = true
+        let appearance: NSAppearance.Name = colorScheme == .dark ? .darkAqua : .aqua
+        if view.effect.appearance?.name != appearance { view.effect.appearance = NSAppearance(named: appearance) }
+        let alpha = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : SessionOrbit.glass(strength)
+        if abs(view.alphaValue - alpha) > 0.0001 { view.alphaValue = alpha }
     }
 }
 
@@ -40,6 +41,11 @@ final class OrbitMaterialView: NSView {
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = frame.size != newSize
+        super.setFrameSize(newSize)
+        if changed { needsLayout = true }
+    }
     override func layout() {
         super.layout()
         CATransaction.begin(); CATransaction.setDisableActions(true)

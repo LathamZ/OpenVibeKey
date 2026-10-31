@@ -36,7 +36,7 @@ public struct CodexSession: Codable, Equatable, Identifiable, Sendable {
 public struct CodexNavigation {
     public enum Stage: String { case idle, choosing, opening, openRequested, suspended }
     public enum Control { case dial, exit }
-    public enum Effect: Equatable { case open(CodexSession), unavailable(String) }
+    public enum Effect: Equatable { case open(CodexSession), cycleApplication, unavailable(String) }
     public private(set) var stage: Stage = .idle
     public private(set) var candidates: [CodexSession] = []
     public private(set) var selection = 0
@@ -73,8 +73,7 @@ public struct CodexNavigation {
         if action == .long { enter(sessions: sessions); return [] }
         switch (control, action) {
         case (.dial, .double):
-            requestID = nil; stage = .idle
-            return [.unavailable("当前仅启用 Codex 工作流；长按旋钮选择会话。")]
+            return [.cycleApplication]
         case (.dial, .single):
             guard stage == .choosing else { return [.unavailable("输入聚焦尚未接入；长按旋钮选择会话。") ] }
             guard let selected else { return [.unavailable("请先添加一条 Codex 会话。") ] }

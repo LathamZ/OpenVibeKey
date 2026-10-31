@@ -9,11 +9,13 @@ import VibeKitHost
 final class PhysicalRotaryMonitor {
     private var manager: IOHIDManager?
     private var mainUsage: UInt32?
-    private var hold = PhysicalRotaryHold()
+    private var clicks = PhysicalRotaryClicks()
+    private var clickTimer: DispatchWorkItem?
     var eligible: () -> Bool = { false }
     var onLongRelease: () -> Void = {}
     var onShortRelease: () -> Void = {}
-    func cancelGesture() { hold.cancel() }
+    var onDoubleRelease: () -> Void = {}
+    func cancelGesture() { clicks.cancel(); clickTimer?.cancel(); clickTimer = nil }
     var onStatus: (String) -> Void = { _ in }
     private(set) var status = "进入会话后检查旋钮监听。" { didSet { onStatus(status) } }
 
@@ -64,7 +66,7 @@ final class PhysicalRotaryMonitor {
             status = "无法读取旋钮初始状态；可从菜单栏点击“选择会话”。"; return false
         }
         let current = currentPointer.pointee.takeUnretainedValue()
-        hold = PhysicalRotaryHold(initiallyHeld: IOHIDValueGetIntegerValue(current) != 0)
+        clicks = PhysicalRotaryClicks(initiallyHeld: IOHIDValueGetIntegerValue(current) != 0)
         mainUsage = UInt32(entry.value); self.manager = manager
         IOHIDManagerRegisterInputValueCallback(manager, { context, _, _, value in
             guard let context else { return }
@@ -73,11 +75,11 @@ final class PhysicalRotaryMonitor {
         IOHIDManagerRegisterDeviceRemovalCallback(manager, { context, _, _, _ in
             guard let context else { return }
             let monitor = Unmanaged<PhysicalRotaryMonitor>.fromOpaque(context).takeUnretainedValue()
-            monitor.hold.cancel()
+            monitor.cancelGesture()
             monitor.status = "VibeKey 监听已断开；重连后重新进入导航。"
         }, Unmanaged.passUnretained(self).toOpaque())
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-        status = "旋钮监听已就绪：短按切换编辑／浏览；按住至少 0.65 秒松开返回会话列表。"
+        status = "旋钮监听已就绪：短按切换编辑／浏览；双击切换 App；按住至少 0.65 秒松开返回会话列表。"
         return true
     }
 
@@ -88,15 +90,32 @@ final class PhysicalRotaryMonitor {
         var timebase = mach_timebase_info_data_t()
         mach_timebase_info(&timebase)
         let time = Double(IOHIDValueGetTimeStamp(value)) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
-        switch hold.action(down: IOHIDValueGetIntegerValue(value) != 0, at: time, eligible: eligible()) {
-        case .long: onLongRelease()
-        case .short: onShortRelease()
-        case nil: break
-        }
+        deliver(clicks.edge(down: IOHIDValueGetIntegerValue(value) != 0, at: time, eligible: eligible()))
+        scheduleClick()
     }
 
+    private func deliver(_ actions: [PressGesture.Action]) {
+        for action in actions {
+            switch action {
+            case .single: onShortRelease()
+            case .double: onDoubleRelease()
+            case .long: onLongRelease()
+            }
+        }
+    }
+    private func scheduleClick() {
+        clickTimer?.cancel(); clickTimer = nil
+        guard let deadline = clicks.deadline else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.deliver(self.clicks.expire(at: ProcessInfo.processInfo.systemUptime, eligible: self.eligible()))
+            self.scheduleClick()
+        }
+        clickTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.001, deadline - ProcessInfo.processInfo.systemUptime), execute: work)
+    }
     func stop() {
-        hold.cancel()
+        cancelGesture()
         guard let manager else { return }
         IOHIDManagerRegisterInputValueCallback(manager, nil, nil)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, nil, nil)

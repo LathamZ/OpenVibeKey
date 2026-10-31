@@ -103,12 +103,14 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                         Text("日常转动是左右移动；进入已适配的会话后，用同一套手势编辑、浏览和切换。")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 10) {
-                            Button("选择会话") { if !preview { controller.enter(inferForeground: false) } }.buttonStyle(.borderedProminent).disabled(!preview && !controller.ready)
+                            Button("选择会话") { if !preview { controller.enter(inferForeground: false) } }.buttonStyle(.borderedProminent).disabled(!preview && (!controller.ready || controller.activeTarget == .weChat))
                             Menu(WorkflowCatalog.target(controller.activeTarget).name) {
                                 Button("Codex") { if !preview { controller.selectTarget(.codex) } }
                                 Button("DeepSeek Harness") { if !preview { controller.selectTarget(.deepSeek) } }
                                 Button("Claude Code") { if !preview { controller.selectTarget(.claudeCode) } }
+                                Button("微信") { if !preview { controller.selectTarget(.weChat) } }
                             }
+                            Button("切换 App") { if !preview { controller.cycleApplication() } }.disabled(controller.switchingApplication || controller.busy)
                             Button("管理会话") { if !preview { openWindow(id: "session-management") } }.buttonStyle(.bordered).disabled(controller.activeTarget != .codex)
                         }
                     }
@@ -200,6 +202,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
         VStack(alignment: .leading, spacing: 16) {
             workspaceCard {
                 Text("选择会话").font(.headline)
+                actionRow("双击旋钮", "仅选择目标 App；菜单栏变色，确认会话后再打开 App")
                 actionRow("长按旋钮并松开", "呼出流动轨道")
                 actionRow("旋转", "移动轨道 · 停下吸附")
                 actionRow("短按旋钮", "打开选中会话")

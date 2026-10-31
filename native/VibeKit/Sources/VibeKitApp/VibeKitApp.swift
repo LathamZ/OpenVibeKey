@@ -17,6 +17,12 @@ struct VibeKitApp: App {
     @ObservedObject private var language = AppLanguage.shared
 
     init() {
+        if let i = CommandLine.arguments.firstIndex(of: "--selector-response-check"), i + 1 < CommandLine.arguments.count {
+            exit(CodexWorkflowController.runResponseCheck(path: CommandLine.arguments[i + 1]))
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--workflow-menu-icon-check"), i + 1 < CommandLine.arguments.count {
+            exit(runWorkflowMenuIconCheck(path: CommandLine.arguments[i + 1]))
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--desktop-adapter-check"), i + 1 < CommandLine.arguments.count {
             let target: WorkflowTargetID = CommandLine.arguments.contains("--claude") ? .claudeCode : .deepSeek
             let adapter = DesktopAccessibilityAdapter(target: target)
@@ -124,7 +130,7 @@ struct VibeKitApp: App {
                 .environmentObject(vm)
                 .environment(\.locale, language.locale)
         } label: {
-            PermissionMenuIcon(connected: vm.connected)
+            PermissionMenuIcon(connected: vm.connected, controller: vm.codexWorkflow)
         }
         .menuBarExtraStyle(.window)     // 面板式，不是下拉菜单
 
@@ -147,10 +153,13 @@ struct VibeKitApp: App {
 /// Lives in the eagerly created menu-bar label, not its lazy popover content.
 private struct PermissionMenuIcon: View {
     let connected: Bool
+    @ObservedObject var controller: CodexWorkflowController
     @ObservedObject private var permissions = PermissionCenter.shared
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Image(systemName: connected ? "dial.medium.fill" : "dial.medium")
+        Image(nsImage: WorkflowMenuIcon.make(target: controller.activeTarget, connected: connected))
+            .renderingMode(.original).frame(width: 18, height: 18)
+            .accessibilityLabel("The Vibekey · " + WorkflowCatalog.target(controller.activeTarget).name)
             .help(L(permissions.allGranted ? "权限已全部授予" : "权限待完善"))
             .onAppear { openMainIfRequested() }
             .onChange(of: permissions.shouldOpenMain) { _ in openMainIfRequested() }

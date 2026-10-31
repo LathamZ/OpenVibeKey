@@ -92,7 +92,7 @@ do {
     _ = nav.gesture(.single, control: .exit, sessions: []); check("short exit closes selector without stop", nav.stage == .openRequested)
     nav.enter(sessions: [a]); _ = nav.gesture(.single, control: .dial, sessions: [])
     nav.dispatched(request: nav.requestID!, session: a, accepted: false); check("failed dispatch stays selector", nav.stage == .choosing)
-    _ = nav.gesture(.double, control: .dial, sessions: []); check("single workflow double does not write/cycle profiles", nav.stage == .idle && nav.requestID == nil)
+    check("double requests quiet app activation without profile effect", nav.gesture(.double, control: .dial, sessions: []) == [.cycleApplication] && nav.stage == .choosing && nav.requestID == nil)
     nav.enter(sessions: []); check("empty selector cannot emit open", nav.gesture(.single, control: .dial, sessions: []).count == 1 && nav.stage == .choosing)
 }
 let slots = zip(["dialP", "dialL", "dialR", "btn3"], [3,5,4,2]).enumerated().map { i, value in
@@ -548,6 +548,57 @@ do {
     }
     check("Codex focus shortcut never leaks to DeepSeek", NativeFocusShortcut.route(configured: true, navigationReady: true, contentSelected: true, frontmostBundleID: "com.deepseek.dsh", rotaryHeld: false) == .captureForNavigation)
 }
+
+// Passive Codex pass-through must agree with captured rotary semantics without replaying input.
+do {
+    var g = PhysicalRotaryClicks()
+    check("passive down emits nothing", g.edge(down:true,at:0,eligible:true).isEmpty)
+    check("passive first release waits",g.edge(down:false,at:0.1,eligible:true).isEmpty)
+    check("passive single has deadline",g.deadline != nil)
+    check("passive single not early",g.expire(at:0.379,eligible:true).isEmpty)
+    check("passive single commits once",g.expire(at:0.381,eligible:true) == [.single])
+    check("passive single never repeats",g.expire(at:1,eligible:true).isEmpty)
+}
+do {
+    var g = PhysicalRotaryClicks()
+    _ = g.edge(down:true,at:0,eligible:true); _ = g.edge(down:false,at:0.1,eligible:true)
+    check("second down still waits",g.edge(down:true,at:0.25,eligible:true).isEmpty)
+    check("no single timer during held second",g.deadline == nil && g.expire(at:0.39,eligible:true).isEmpty)
+    check("passive double only on second release",g.edge(down:false,at:0.4,eligible:true) == [.double])
+    check("double suppresses both singles",g.expire(at:2,eligible:true).isEmpty)
+}
+for second in [false,true] {
+    var g = PhysicalRotaryClicks()
+    if second { _ = g.edge(down:true,at:0,eligible:true); _ = g.edge(down:false,at:0.1,eligible:true) }
+    _ = g.edge(down:true,at:0.25,eligible:true)
+    check("repeat down not another click",g.edge(down:true,at:0.3,eligible:true).isEmpty)
+    check("passive hold never fires before release",g.expire(at:2,eligible:true).isEmpty)
+    check("passive long is release committed",g.edge(down:false,at:2.5,eligible:true) == [.long])
+    check("long has no trailing single or double",g.expire(at:3,eligible:true).isEmpty)
+}
+do {
+    var g = PhysicalRotaryClicks(initiallyHeld:true)
+    check("initial held barrier ignores repeat",g.edge(down:true,at:1,eligible:true).isEmpty)
+    check("initial held release ignored",g.edge(down:false,at:2,eligible:true).isEmpty)
+    _ = g.edge(down:true,at:3,eligible:true); g.cancel()
+    check("context cancel retains release barrier",g.edge(down:true,at:4,eligible:true).isEmpty && g.edge(down:false,at:5,eligible:true).isEmpty)
+    _ = g.edge(down:true,at:6,eligible:false)
+    check("ineligible down cannot become eligible hold",g.edge(down:false,at:8,eligible:true).isEmpty)
+    _ = g.edge(down:true,at:9,eligible:true); _ = g.edge(down:false,at:9.1,eligible:true)
+    check("foreground change cancels pending single",g.expire(at:10,eligible:false).isEmpty && g.expire(at:11,eligible:true).isEmpty)
+}
+for bits in 0..<16 {
+    let available = Set(WorkflowAppCycle.order.enumerated().filter { bits & (1 << $0.offset) != 0 }.map(\.element))
+    for current in WorkflowAppCycle.order {
+        let next = WorkflowAppCycle.next(after:current,available:available)
+        check("app cycle never selects unavailable or current", next.map { available.contains($0) && $0 != current } ?? available.subtracting([current]).isEmpty)
+    }
+}
+check("requested app cycle ordering", WorkflowAppCycle.order == [.codex,.claudeCode,.deepSeek,.weChat])
+for (id,hex) in [(WorkflowTargetID.codex,"FFFFFF"),(.claudeCode,"D97757"),(.deepSeek,"4176E6"),(.weChat,"07C160")] {
+    check("menu identity uses app palette", WorkflowCatalog.target(id).haloHex == hex)
+}
+check("green WeChat remains activation only",!WorkflowCatalog.supports(.conversations,in:.weChat))
 
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
 exit(failures == 0 ? 0 : 1)

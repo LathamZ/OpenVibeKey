@@ -787,6 +787,7 @@ final class VibeVM: ObservableObject {
                 self.codexWorkflow.navigation.stage == .openRequested &&
                 NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
         }
+        physicalRotaryMonitor.onDoubleRelease = { [weak self] in self?.codexWorkflow.cycleApplication() }
         physicalRotaryMonitor.onShortRelease = { [weak self] in self?.codexWorkflow.toggleRotaryMode() }
         codexWorkflow.cancelPhysicalRotaryGesture = { [weak self] in self?.physicalRotaryMonitor.cancelGesture() }
         physicalRotaryMonitor.onLongRelease = { [weak self] in self?.codexWorkflow.enter() }
@@ -1686,7 +1687,7 @@ extension VibeVM {
             switch action {
             case .double:
                 dialClickTimer?.invalidate(); dialClickTimer = nil
-                cycleDialProfile()
+                codexWorkflow.cycleApplication()
             case .single:
                 if appBindings["dialP"] != nil { fireAppBinding(slot: "dialP") }
                 else {
@@ -1878,7 +1879,16 @@ extension VibeVM {
         }
     }
     private func navigationPressed(_ slot: String) {
-        guard codexWorkflow.ready, !codexWorkflow.busy, !codexWorkflow.pageRoutingBusy, connected, !quitting else { return }
+        guard codexWorkflow.ready, !codexWorkflow.busy, connected, !quitting else { return }
+        if (slot == "dialL" || slot == "dialR"), codexWorkflow.navigation.stage == .choosing {
+            if navigationRotationHeld.insert(slot).inserted { codexWorkflow.rotate(slot == "dialL" ? -1 : 1) }
+            return
+        }
+        if slot == "dialP", codexWorkflow.pageRoutingBusy {
+            navigationActions(navigationDial.press(at: ProcessInfo.processInfo.systemUptime), control: .dial)
+            scheduleNavigationDeadline(); return
+        }
+        guard !codexWorkflow.pageRoutingBusy else { return }
         if slot == "btn1" || slot == "btn2" {
             if codexWorkflow.navigation.stage == .choosing { wheelPagePress.press(slot, generation: codexWorkflow.selectorGeneration) }
             return
@@ -1921,8 +1931,10 @@ extension VibeVM {
         codexWorkflow.refreshPhysicalFocusRoute()
     }
     private func navigationActions(_ actions: [PressGesture.Action], control: CodexNavigation.Control) {
-        guard codexWorkflow.ready, !codexWorkflow.busy, !codexWorkflow.pageRoutingBusy, connected, !quitting else { return }
-        for action in actions { codexWorkflow.gesture(action, control: control) }
+        guard codexWorkflow.ready, !codexWorkflow.busy, connected, !quitting else { return }
+        for action in actions {
+            if !codexWorkflow.pageRoutingBusy || (control == .dial && (action == .double || action == .long)) { codexWorkflow.gesture(action, control: control) }
+        }
     }
     private func scheduleNavigationDeadline() {
         navigationTimer?.invalidate(); navigationTimer = nil

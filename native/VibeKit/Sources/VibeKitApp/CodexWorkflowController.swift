@@ -21,10 +21,50 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     @Published private(set) var activeTarget: WorkflowTargetID = .codex
     @Published private(set) var adapterSessions: [CodexSession] = []
     var contentBundleID: String { activeTarget.bundleID ?? "" }
+    private struct Context {
+        let navigation: CodexNavigation
+        let sessions: [CodexSession]
+        let editing: Bool
+    }
+    private var contexts: [WorkflowTargetID: Context] = [:]
+    @Published private(set) var switchingApplication = false
     func selectTarget(_ target: WorkflowTargetID) {
-        guard target != .weChat, target != activeTarget else { return }
-        suspend(message: ""); activeTarget = target; adapterSessions = []; refreshError = nil
-        navigation.reset(); refreshPhysicalFocusRoute()
+        guard !switchingApplication, target != activeTarget else { return }
+        if navigation.stage == .choosing { panel?.close() }
+        if navigation.stage == .openRequested {
+            contexts[activeTarget] = Context(navigation: navigation, sessions: adapterSessions, editing: rotaryEditing)
+        }
+        suspend(message: ""); notice?.orderOut(nil)
+        activeTarget = target; refreshError = nil
+        if let context = contexts[target] {
+            navigation = context.navigation; adapterSessions = context.sessions; rotaryEditing = context.editing
+        } else { navigation.reset(); adapterSessions = []; rotaryEditing = true }
+        if !preview { defaults.set(target.rawValue, forKey: "workflow.activeTarget.v1") }
+        refreshPhysicalFocusRoute()
+    }
+    private func applicationURL(_ target: WorkflowTargetID) -> URL? {
+        guard let bundleID = target.bundleID else { return nil }
+        let filename: String
+        switch target {
+        case .codex: filename = "ChatGPT.app"
+        case .claudeCode: filename = "Claude.app"
+        case .deepSeek: filename = "DeepSeek Harness.app"
+        case .weChat: filename = "WeChat.app"
+        }
+        let canonical = URL(fileURLWithPath: "/Applications").appendingPathComponent(filename)
+        if Bundle(url: canonical)?.bundleIdentifier == bundleID { return canonical }
+        guard let resolved = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+              Bundle(url: resolved)?.bundleIdentifier == bundleID else { return nil }
+        return resolved
+    }
+    /// Quiet target preselection only; launch and activation happen after conversation confirmation.
+    func cycleApplication() {
+        guard !switchingApplication, !busy, !hasRecovery, navigation.stage != .opening else { return }
+        let available = Set(WorkflowAppCycle.order.filter { preview || applicationURL($0) != nil })
+        guard let target = WorkflowAppCycle.next(after: activeTarget, available: available) else { return }
+        notice?.orderOut(nil); cancelPhysicalRotaryGesture?(); cancelPendingGestures?()
+        // This changes the selector's target only. App launch/activation belongs to confirmed open().
+        selectTarget(target); message = ""
     }
     func enter(target: WorkflowTargetID) { selectTarget(target); enter(inferForeground: false) }
     /// The same selector renders target-specific sessions; fixture colors remain previewable.
@@ -44,6 +84,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     @Published var listStatus = "打开选择面板时会自动读取本机未归档会话。"
     private var refreshGeneration = UUID()
     private var listTask: Task<CodexThreadListing, Error>?
+    private var desktopListTask: Task<DesktopAccessibilityAdapter.Listing, Error>?
+    private var selectorInteracted = false
+    private var currentSessionIDs: [String: String] = [:]
     var sessions: [CodexSession] { activeTarget == .codex ? CodexSessionCatalog.merge(pinned: pinnedSessions, recent: recentThreads) : adapterSessions }
     var projectNames: [String: String] { Dictionary(recentThreads.map { ($0.session.id, $0.project) }, uniquingKeysWith: { first, _ in first }) }
     var filteredSessions: [CodexSession] { CodexSessionCatalog.filter(sessions, query: selectorQuery, projects: projectNames) }
@@ -101,6 +144,8 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         return SessionWheelPaging.ordered(filteredSessions, activity: activity, opened: localOpened)
     }
     private func recordOpened(_ session: CodexSession) {
+        currentSessionIDs[session.target.rawValue] = session.id
+        defaults.set(currentSessionIDs, forKey: "workflow.currentSession.v1")
         localOpened[session.id] = Date().timeIntervalSince1970
         if let data = try? JSONEncoder().encode(localOpened) { defaults.set(data, forKey: openedKey) }
     }
@@ -122,11 +167,15 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private func enterWheel(preferredID: String? = nil) {
         ensureColors()
         let ordered = wheelSessions
-        navigation.enter(sessions: ordered, preferredID: preferredID ?? ordered.first?.id)
-        resetWheelMotion()
+        var transaction = Transaction(animation: nil); transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            navigation.enter(sessions: ordered, preferredID: preferredID ?? currentSessionIDs[activeTarget.rawValue] ?? navigation.lastRequestedID ?? ordered.first?.id)
+            resetWheelMotion()
+        }
     }
     func turnWheelPage(_ delta: Int) {
         guard (ready || preview), navigation.stage == .choosing, !selectorLoading, !pageRoutingBusy else { return }
+        selectorInteracted = true
         let previous = navigation.selection
         settleWheelMotion()
         navigation.turnWheelPage(delta)
@@ -178,6 +227,8 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
 
     init(defaults: UserDefaults = .standard, preview: Bool = false) {
         self.defaults = defaults; self.preview = preview
+        currentSessionIDs = defaults.dictionary(forKey: "workflow.currentSession.v1") as? [String: String] ?? [:]
+        if !preview, let raw = defaults.string(forKey: "workflow.activeTarget.v1"), let target = WorkflowTargetID(rawValue: raw) { activeTarget = target }
         if let data = defaults.data(forKey: sessionKey) {
             let saved = (try? JSONDecoder().decode([CodexSession].self, from: data)) ?? []
             var seen = Set<String>()
@@ -207,6 +258,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 Task { @MainActor [weak self] in
                     guard let self, self.ready else { return }
                     self.cancelPhysicalRotaryGesture?()
+                    if self.switchingApplication { return }
                     if app.bundleIdentifier == self.contentBundleID {
                         self.refreshPhysicalFocusRoute(); return
                     }
@@ -223,6 +275,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                     }
                 }
             }
+        if !preview { DispatchQueue.main.async { [weak self] in self?.refreshSessions() } }
     }
     func configureNativeFocus(enabled: Bool, mainKey: String) {
         guard !ready, !busy, !hasRecovery, NativeFocusShortcut.allowedMainKeys.contains(mainKey) else { return }
@@ -270,27 +323,44 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
     private func cancelRefresh() {
         if refreshing { listStatus = recentThreads.isEmpty ? "读取已取消；固定会话仍可使用。" : "已保留最近读取的会话，可再次刷新。" }
-        refreshGeneration = UUID(); listTask?.cancel(); listTask = nil
+        refreshGeneration = UUID(); listTask?.cancel(); listTask = nil; desktopListTask?.cancel(); desktopListTask = nil
         refreshing = false; selectorLoading = false
     }
     func refreshSessions(replaceSelector: Bool = false) {
-        guard !preview else { return }
-        let selection = navigation.selected?.id
-        if activeTarget == .deepSeek || activeTarget == .claudeCode {
-            cancelRefresh(); refreshError = nil
-            do {
-                adapterSessions = try activeTarget == .deepSeek ? deepSeekAdapter.list() : claudeAdapter.list()
-                ensureColors(); listStatus = activeTarget == .deepSeek ? deepSeekAdapter.status : "Claude App 已连接，列出 Code 会话。"
-            }
-            catch { adapterSessions = []; listStatus = error.localizedDescription; refreshError = listStatus }
-            if replaceSelector, navigation.stage == .choosing { enterWheel(preferredID: selection) }
+        guard !preview, activeTarget != .weChat else { return }
+        if refreshing {
+            if replaceSelector { selectorLoading = navigation.candidates.isEmpty }
             return
         }
+        let selection = navigation.selected?.id
         cancelRefresh()
         let generation = UUID(); refreshGeneration = generation
-        refreshing = true; selectorLoading = replaceSelector; refreshError = nil
-        if replaceSelector { cancelPendingGestures?(); resetWheelMotion() }
-        listStatus = "正在读取本机未归档会话…"
+        let needsInitialList = replaceSelector && navigation.candidates.isEmpty
+        refreshing = true; selectorLoading = needsInitialList; refreshError = nil
+        if needsInitialList { cancelPendingGestures?(); resetWheelMotion() }
+        listStatus = "正在后台更新会话…"
+        if activeTarget == .deepSeek || activeTarget == .claudeCode {
+            let target = activeTarget
+            let task = Task.detached(priority: .userInitiated) { try DesktopAccessibilityAdapter.fetch(target: target) }
+            desktopListTask = task
+            Task { @MainActor [weak self] in
+                let result = await task.result
+                guard let self, self.refreshGeneration == generation, self.activeTarget == target else { return }
+                self.desktopListTask = nil; self.refreshing = false; self.selectorLoading = false
+                switch result {
+                case .success(let listing):
+                    (target == .deepSeek ? self.deepSeekAdapter : self.claudeAdapter).adopt(listing)
+                    self.adapterSessions = listing.sessions; self.ensureColors(); self.listStatus = listing.status
+                    if let id = listing.selectedID { self.currentSessionIDs[target.rawValue] = id; self.defaults.set(self.currentSessionIDs, forKey: "workflow.currentSession.v1") }
+                    if self.navigation.stage == .choosing, !self.selectorInteracted {
+                        self.enterWheel(preferredID: self.currentSessionIDs[self.activeTarget.rawValue] ?? selection)
+                    }
+                case .failure(let error):
+                    self.listStatus = error.localizedDescription; self.refreshError = self.listStatus
+                }
+            }
+            return
+        }
         guard let executable = codexNavigationCLIURL() else {
             refreshing = false; selectorLoading = false
             listStatus = "未找到 Codex 命令行组件；当前仅显示固定会话。"; refreshError = listStatus; return
@@ -308,9 +378,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 self.recentThreads = listing.threads
                 self.ensureColors()
                 self.listStatus = "已读取 \(listing.threads.count) 条本机未归档会话" + (listing.hasMore ? "（仅显示最近 2000 条）" : "") + "。转盘按最近使用排序。"
-                if replaceSelector, self.navigation.stage == .choosing {
+                if self.navigation.stage == .choosing, !self.selectorInteracted {
                     self.cancelPendingGestures?()
-                    self.enterWheel(preferredID: selection)
+                    self.enterWheel(preferredID: self.currentSessionIDs[self.activeTarget.rawValue] ?? selection)
                 }
             case .failure(let error):
                 self.listStatus = error.localizedDescription + (self.recentThreads.isEmpty ? " 当前仅显示固定会话。" : " 已保留上次读取的列表。")
@@ -323,11 +393,12 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         cancelPendingGestures?()
         enterWheel(preferredID: navigation.selected?.id)
     }
-    func enter(inferForeground: Bool = true) {
-        guard ready || preview else { message = "请先连接设备并启用导航模式。"; return }
-        if inferForeground, !preview, let target = [WorkflowTargetID.codex, .deepSeek, .claudeCode].first(where: { $0.bundleID == NSWorkspace.shared.frontmostApplication?.bundleIdentifier }) { selectTarget(target) }
+    func enter(inferForeground: Bool = false) {
+        guard (ready || preview), !switchingApplication else { return }
+        if inferForeground, !preview, let target = WorkflowAppCycle.order.first(where: { $0.bundleID == NSWorkspace.shared.frontmostApplication?.bundleIdentifier }) { selectTarget(target) }
+        guard WorkflowCatalog.supports(.conversations, in: activeTarget) else { return }
         selectorGeneration = UUID()
-        cancelPendingGestures?(); selectorQuery = ""; enterWheel()
+        cancelPendingGestures?(); selectorQuery = ""; selectorInteracted = false; enterWheel()
         captureRotaryForNavigation()
         guard ready || preview else { return }
         message = "转动在当前盘选择，旋钮短按打开；按钮1／2换盘，第三键取消。"
@@ -342,8 +413,11 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         panel?.close()
     }
     func gesture(_ action: PressGesture.Action, control: CodexNavigation.Control) {
-        guard (ready || preview), !pageRoutingBusy else { return }
+        guard (ready || preview), !switchingApplication else { return }
+        if action == .double, control == .dial { cycleApplication(); return }
+        guard activeTarget != .weChat else { return }
         if action == .long { enter(); return }
+        guard !pageRoutingBusy else { return }
         if selectorLoading, control == .dial { return }
         if action == .single, control == .dial, navigation.stage == .openRequested {
             toggleRotaryMode(); return
@@ -357,8 +431,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         refreshPhysicalFocusRoute()
     }
     func rotate(_ delta: Int) {
-        guard (ready || preview), !selectorLoading, !pageRoutingBusy else { return }
+        guard (ready || preview), !selectorLoading else { return }
         if navigation.stage == .choosing {
+            selectorInteracted = true
             wheelSettleTask?.cancel()
             wheelMotion.turn(delta, stepsPerItem: wheelStepsPerItem)
             wheelSnapping = false; wheelPosition = wheelMotion.position
@@ -371,12 +446,13 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 self.settleWheelMotion()
             }
             wheelSettleTask = task
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: task)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: task)
         }
-        else { execute(navigation.rotate(delta)) }
+        else if !pageRoutingBusy { execute(navigation.rotate(delta)) }
     }
     func choose(_ id: String) {
-        guard !selectorLoading, !pageRoutingBusy else { return }
+        guard !selectorLoading, navigation.stage == .choosing else { return }
+        selectorInteracted = true
         wheelSettleTask?.cancel(); wheelSettleTask = nil
         let page = wheelPage
         navigation.select(id: id)
@@ -398,10 +474,15 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private func execute(_ effects: [CodexNavigation.Effect]) {
         for effect in effects {
             switch effect {
+            case .cycleApplication: cycleApplication()
             case .unavailable(let text): message = text; showNotice(text)
             case .open(let session): open(session)
             }
         }
+    }
+    private func desktopOpenFailed(request: UUID, session: CodexSession, error: Error) {
+        navigation.dispatched(request: request, session: session, accepted: false)
+        message = error.localizedDescription; refreshError = message; present()
     }
     private func open(_ session: CodexSession) {
         guard let request = navigation.requestID else { return }
@@ -412,6 +493,29 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         if activeTarget != .codex {
             let target = activeTarget
             let adapter = target == .deepSeek ? deepSeekAdapter : claudeAdapter
+            if NSRunningApplication.runningApplications(withBundleIdentifier: contentBundleID).isEmpty {
+                guard let url = applicationURL(target) else {
+                    navigation.dispatched(request: request, session: session, accepted: false); return
+                }
+                let config = NSWorkspace.OpenConfiguration(); config.activates = true
+                NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] _, error in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.navigation.requestID == request, self.activeTarget == target else { return }
+                        if let error { self.desktopOpenFailed(request: request, session: session, error: error); return }
+                        for _ in 0..<15 {
+                            let result = await Task.detached(priority: .userInitiated) { try DesktopAccessibilityAdapter.fetch(target: target) }.result
+                            guard self.navigation.requestID == request, self.activeTarget == target else { return }
+                            if case .success(let listing) = result, listing.sessions.contains(where: { $0.id == session.id }) {
+                                adapter.adopt(listing); self.adapterSessions = listing.sessions
+                                self.open(session); return
+                            }
+                            try? await Task.sleep(nanoseconds: 200_000_000)
+                        }
+                        self.desktopOpenFailed(request: request, session: session, error: DesktopAccessibilityAdapter.Failure("应用已打开，但尚未确认原会话，请刷新后重选。"))
+                    }
+                }
+                return
+            }
             do {
                 try adapter.open(session)
                 navigation.dispatched(request: request, session: session, accepted: true)
@@ -444,7 +548,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 guard let self, self.navigation.requestID == request else { return }
                 self.navigation.dispatched(request: request, session: session, accepted: error == nil)
                 if error == nil {
-                    self.localOpened[session.id] = Date().timeIntervalSince1970
+                    self.recordOpened(session)
                     if let data = try? JSONEncoder().encode(self.localOpened) { self.defaults.set(data, forKey: self.openedKey) }
                     self.rotaryEditing = false
                     self.refreshPhysicalFocusRoute()
@@ -489,8 +593,8 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 case 36, 76: self.gesture(.single, control: .dial)
                 case 123: self.rotate(-1)
                 case 124: self.rotate(1)
-                case 116: self.turnWheelPage(-1)
-                case 121: self.turnWheelPage(1)
+                case 116: if self.pageRoutingBusy { self.rotate(-1) } else { self.turnWheelPage(-1) }
+                case 121: if self.pageRoutingBusy { self.rotate(1) } else { self.turnWheelPage(1) }
                 default: return false
                 }
                 return true
@@ -751,4 +855,39 @@ func runNativeFocusSetupPreview(outputPath: String) {
         }
     }
     withExtendedLifetime([controller,window] as [Any]) { app.run() }
+}
+
+
+extension CodexWorkflowController {
+    static func runResponseCheck(path: String) -> Int32 {
+        let suite = "vibekey-selector-response-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let c = CodexWorkflowController(defaults: defaults, preview: true)
+        c.recentThreads = (1...12).map { i in
+            CodexThreadSummary(session: CodexSession(reference: String(format: "00000000-0000-0000-0000-%012d",i), title: "Fixture \(i)")!, project: "Fixture", updatedAt: Int64(100-i))
+        }
+        var checks: [String: Bool] = [:]
+        c.currentSessionIDs[WorkflowTargetID.codex.rawValue] = c.recentThreads[2].session.id
+        c.enterWheel()
+        checks["default_prefers_known_current_over_most_recent"] = c.navigation.selected?.id == c.recentThreads[2].session.id
+        c.currentSessionIDs = [:]; c.enterWheel(); c.setWheelSteps(1); c.pageRoutingBusy = true
+        let start = ProcessInfo.processInfo.systemUptime
+        c.rotate(1)
+        let elapsed = (ProcessInfo.processInfo.systemUptime - start) * 1000
+        checks["rotation_works_while_device_mapping_pending"] = c.wheelPosition == 1
+        checks["selection_updates_immediately"] = c.navigation.selection == 1
+        checks["interaction_prevents_refresh_reorder"] = c.selectorInteracted
+        checks["cached_rotation_cpu_under_50ms"] = elapsed < 50
+        let explicit = c.navigation.candidates[2].id; c.choose(explicit)
+        checks["card_highlight_is_not_disabled_by_device_preparation"] = c.navigation.selected?.id == explicit
+        c.selectorLoading = true; let before = c.wheelPosition; c.rotate(1)
+        checks["empty_initial_loading_does_not_choose_unknown_item"] = c.wheelPosition == before
+        c.pageRoutingBusy = false; c.selectorLoading = false; c.stop()
+        let data: [String: Any] = ["checks": checks, "rotation_ms": elapsed, "hardware_or_target_UI_access": false]
+        do { try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted,.sortedKeys]).write(to: URL(fileURLWithPath:path)) }
+        catch { return 1 }
+        print("Selector response checks: \(checks.count), failures: \(checks.values.filter { !$0 }.count)")
+        return checks.values.allSatisfy { $0 } ? 0 : 1
+    }
 }

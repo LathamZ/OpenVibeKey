@@ -339,7 +339,7 @@ struct ContentView: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Text(L("双击旋钮切换配置")).lineLimit(1)
+                    Text(L("双击旋钮切换 App")).lineLimit(1)
                     Spacer(minLength: 0)
                     Text(L("间隔")).foregroundStyle(.secondary)
                     Text(vm.dialDoubleClickInterval, format: .number.precision(.fractionLength(1)))
@@ -353,7 +353,7 @@ struct ContentView: View {
                         .disabled(vm.applyingProfile || vm.dialGestureBusy)
                 }.font(.caption).fixedSize(horizontal: false, vertical: true)
                 Group {
-                    Text(L("全局生效，范围 0.1–1 秒。单击等待此时间后执行；双击仅切换配置。"))
+                    Text(L("全局生效，范围 0.1–1 秒。单击等待此时间后执行；双击仅切换 App。"))
                         .font(.caption2).foregroundStyle(.secondary)
                     if vm.dialGestureBusy || vm.applyingProfile {
                         Text(L("正在更新旋钮设置…")).font(.caption2).foregroundStyle(.secondary)

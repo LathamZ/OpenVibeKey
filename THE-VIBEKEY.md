@@ -2,10 +2,19 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.4
+## 1.0.0-preview.5 (build 44)
+
+- Double rotary click preselects Codex → Claude → DeepSeek → WeChat (installed targets only). It changes the menu marker silently; it never launches or activates the target. Long rotary entry uses this selected target. Only confirming a conversation opens/activates its App.
+- Retains the original dial menu symbol and colors only its perimeter dots: Codex white, Claude orange, DeepSeek light sky blue (#9CD9FF), WeChat green. DeepSeek dots are enlarged 50%, others 18%; selector halos retain the original App colors.
+- Cached sessions stay interactive during background refresh and hardware preparation. Initial positioning and selected border/halo update immediately, without an initial trip around the orbit. Tracking uses 35ms transitions, settling starts after 120ms with a 220ms spring response; these are animation settings, not measured hardware-to-screen latency.
+- DeepSeek prefers its selected sidebar row; Claude Code prefers a unique matching current heading. Codex uses the most recently confirmed/opened conversation known to VibeKey: its official interface does not expose the desktop's active conversation after manual switching. Unknown identity falls back to a known request or the recent list.
+- A cold first fetch still waits for real sessions. Desktop lists require exposed sidebars. WeChat has preselection/green identification only, with no conversation adapter.
+- Keeps the stable signing identity, bundle ID, permissions, glass/tint/sensitivity preferences and original-key recovery. Physical feel and recipient-Mac acceptance are separate checks.
+
+## Earlier desktop adapter release (1.0.0-preview.4)
 
 - Adds real DeepSeek Harness and **Claude.app Code-page** session adapters. Both enumerate the expanded native sidebar, open a selected conversation through public macOS Accessibility, and request main-composer focus without reading draft values or sending text.
-- Long rotary entry identifies the foreground target. The workbench target menu/application cards allow an explicit choice, preserved even when the menu-bar app does not become the system's frontmost app.
+- In this earlier release, long rotary entry identified the foreground target (superseded by preview.5 target preselection). The workbench target menu/application cards allow an explicit choice, preserved even when the menu-bar app does not become the system's frontmost app.
 - Reuses the orbit, paging, cancel, physical editing arrows and Backspace/repeat. Browsing still depends on focus; physical-device acceptance for the two new targets remains separate.
 - Device settings provide a selector-preview button for live glass/tint adjustment.
 - Codex keeps its established official interfaces. WeChat is deferred; no CLI/Herdr bridge is shipped. No new stop/resume, new-chat or model-navigation bindings are introduced.
@@ -49,7 +58,7 @@ Requires macOS, the Swift toolchain/Xcode and a pre-existing trusted code-signin
 swift scripts/make-brand-icon.swift assets/the-vibekey
 iconutil -c icns assets/the-vibekey/TheVibekey.iconset -o assets/the-vibekey/AppIcon.icns
 VIBEKEY_SIGN_IDENTITY='<exact existing certificate SHA-1>' python3 scripts/package-personal-dev.py
-python3 scripts/package-distribution.py --app 'dist/The Vibekey.app' --output 'dist/releases/1.0.0-preview.1'
+python3 scripts/package-distribution.py --app 'dist/The Vibekey.app' --output 'dist/releases/1.0.0-preview.5'
 ```
 
 The packaging script defaults to arm64 + x86_64, checks the stable signature and resource/modifier probes, and refuses to overwrite an existing bundle. Set VIBEKEY_BUILD_PATH for an external Swift scratch directory. VIBEKEY_ARCHS=arm64 is available for a local-only build. Personal configuration under ~/.config/openvibekey is a build-machine input only, never copied into the application.
@@ -58,7 +67,7 @@ A distribution may additionally include a public certificate directory using --p
 
 ## Controls in this release
 
-Long rotary press, then release: open selector. Rotate: move along the orbit. Short rotary press: open selected conversation. Buttons 1 (microphone) / 2 (check): previous/next page. Button 3 (cross): cancel without opening the highlight. In the selected Codex, DeepSeek Harness or Claude.app Code session, short rotary switches editing/browsing; physical rotary emits Left/Right or PageUp/PageDown. Button 3 retains Backspace and hardware repeat. Other applications retain default Left/Right rotation. Configure Codex's own focusMainChat shortcut to Control+Option+Command+F12.
+Double rotary click: preselect target App silently. Long rotary press, then release: open the preselected target’s selector without activating it. Rotate: move along the orbit. Short rotary press: open selected conversation. Buttons 1 (microphone) / 2 (check): previous/next page. Button 3 (cross): cancel without opening the highlight. In the selected Codex, DeepSeek Harness or Claude.app Code session, short rotary switches editing/browsing; physical rotary emits Left/Right or PageUp/PageDown. Button 3 retains Backspace and hardware repeat. Other applications retain default Left/Right rotation. Configure Codex's own focusMainChat shortcut to Control+Option+Command+F12.
 
 ## Verification boundary
 

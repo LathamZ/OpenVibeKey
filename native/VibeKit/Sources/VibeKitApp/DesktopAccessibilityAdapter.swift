@@ -6,13 +6,28 @@ import VibeKitHost
 /// Public macOS Accessibility only, confined to the two explicit desktop adapters.
 /// Codex is deliberately excluded and retains its independent official interface path.
 /// No input values, message text, private IPC, coordinates or synthetic keystrokes.
-@MainActor
 final class DesktopAccessibilityAdapter {
     let target: WorkflowTargetID
     init(target: WorkflowTargetID) { precondition(target == .deepSeek || target == .claudeCode); self.target = target }
     private var bundleID: String { target == .deepSeek ? "com.deepseek.dsh" : "com.anthropic.claudefordesktop" }
     private var appName: String { target == .deepSeek ? "DeepSeek Harness" : "Claude Code" }
     struct Entry { let session: CodexSession; let row: AXUIElement; let label: String; let pid: pid_t }
+    /// Each reader instance stays on its own task. Immutable AX handles are adopted on the main actor.
+    struct Listing: @unchecked Sendable {
+        let sessions: [CodexSession]
+        let selectedID: String?
+        fileprivate let entries: [String: Entry]
+        let status: String
+    }
+    static func fetch(target: WorkflowTargetID) throws -> Listing {
+        try Task.checkCancellation()
+        let reader = DesktopAccessibilityAdapter(target: target)
+        let sessions = try reader.list()
+        try Task.checkCancellation()
+        return Listing(sessions: sessions, selectedID: reader.selectedID, entries: reader.entries, status: reader.status)
+    }
+    @MainActor func adopt(_ listing: Listing) { entries = listing.entries; selectedID = listing.selectedID; status = listing.status }
+    private var selectedID: String?
     private var entries: [String: Entry] = [:]
     private(set) var status = "尚未读取"
     private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -50,6 +65,7 @@ final class DesktopAccessibilityAdapter {
     }
     func list() throws -> [CodexSession] {
         let (app, root) = try application()
+        selectedID = nil
         if target == .claudeCode { return try claudeList(app: app, root: root) }
         guard let outline = first(in: root, role: kAXOutlineRole, name: "会话") else {
             throw Failure("未找到 DeepSeek 会话侧栏，请先展开侧栏。")
@@ -71,6 +87,7 @@ final class DesktopAccessibilityAdapter {
                     let chars = Array(hex)
                     let reference = [0..<8,8..<12,12..<16,16..<20,20..<32].map { String(chars[$0]) }.joined(separator: "-")
                     guard let session = CodexSession(adapterReference: reference, title: title, target: target) else { continue }
+                    if attribute(element, kAXSelectedAttribute) as? Bool == true { selectedID = session.id }
                     result.append(session); next[session.id] = Entry(session: session, row: element, label: title, pid: app.processIdentifier)
                 }
             } else { queue += children(element) }
@@ -101,6 +118,10 @@ final class DesktopAccessibilityAdapter {
                 result.append(session); next[session.id] = Entry(session: session, row: button, label: title, pid: app.processIdentifier)
             }
             queue += siblings
+        }
+        if let pane = first(in: root, role: kAXGroupRole, name: "Primary pane"), let heading = first(in: pane, role: "AXHeading") {
+            let matches = result.filter { $0.title == label(heading) }
+            if matches.count == 1 { selectedID = matches[0].id }
         }
         entries = next; status = "已读取 Claude App 的 \(result.count) 条 Code 会话；仅包含已展开侧栏中的会话。"
         UserDefaults.standard.set(result.count, forKey: "adapter.claudeCode.lastCount")
