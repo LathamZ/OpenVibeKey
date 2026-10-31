@@ -40,7 +40,7 @@ if args.public_certificate_dir:
         if not path.is_file() or path.is_symlink():
             raise SystemExit('Expected regular public certificate file missing: '+filename)
         shutil.copy2(path, dest/filename)
-(staging/'安装说明.txt').write_text('''the Vibekey · 1.0.0-preview.1
+(staging/'安装说明.txt').write_text('''the Vibekey · ''' + info['CFBundleShortVersionString'] + '''
 
 1. 将 the Vibekey.app 拖到 Applications（应用程序）。支持 Apple Silicon 和 Intel，最低 macOS 13。
 2. 退出旧 Open VibeKey、Open VibeKey Dev 或其他同设备控制软件，再打开新版本。
@@ -49,7 +49,7 @@ if args.public_certificate_dir:
 5. 要使用 Codex 会话，需要该 Mac 安装并登录 Codex 桌面版；在其快捷键设置中将 focusMainChat／聚焦主聊天输入框绑定为 Control+Option+Command+F12。
 6. 长按旋钮并松开呼出轨道，旋转选择、短按进入；麦克风键上一页、勾键下一页、叉键取消。详细操作在设置“高效使用”；灵敏度与玻璃浓度在“设备设置”。
 
-已知范围：只有 Codex 既有会话路径已接入；DeepSeek Harness、微信尚待适配。新建会话、模型导航、统一停止／继续仍在方案评审中。
+已知范围：只有 Codex 既有会话路径已接入；DeepSeek Harness、Claude Code、微信尚待适配。新建会话、模型导航、统一停止／继续仍在方案评审中。
 
 包内没有个人聊天、设备序列号、用户配置或签名私钥。本机完成了构建和包校验；接收者 Mac 首次安装和实机手感需要单独验收。
 ''')

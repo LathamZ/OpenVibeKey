@@ -295,7 +295,7 @@ do {
   check("owned slots alone are protected",!WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:true))
   check("paused navigation permits manual key editing",WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:false))
  }
- check("catalog has exactly the three approved applications",WorkflowCatalog.targets.count == 3 && Set(WorkflowCatalog.targets.map(\.id)) == Set([.codex, .deepSeek, .weChat]))
+ check("catalog restores Claude Code alongside existing targets",WorkflowCatalog.targets.count == 4 && Set(WorkflowCatalog.targets.map(\.id)) == Set([.codex, .deepSeek, .claudeCode, .weChat]))
  check("Codex retains real session capability",WorkflowCatalog.supports(.conversations,in:.codex))
  for id in WorkflowTargetID.allCases where id != .codex {
   check("planned adapter is never treated as integrated",!WorkflowCatalog.target(id).integrated)
@@ -511,6 +511,20 @@ do {
     check("click previous across seam takes short backward path", motion.position == 7 && motion.nearest == 7)
     motion.reset(selection: 8, total: 9); motion.select(selection: 0)
     check("outside-page click cannot corrupt selection", motion.position == 0 && motion.nearest == 8)
+}
+
+// App identity colors and geometry stay independent of unimplemented adapter actions.
+do {
+    check("Codex has white selection light", WorkflowCatalog.target(.codex).haloHex == "FFFFFF")
+    check("DeepSeek uses official homepage blue", WorkflowCatalog.target(.deepSeek).haloHex == "4176E6")
+    check("Claude uses official Claude orange", WorkflowCatalog.target(.claudeCode).haloHex == "D97757")
+    check("Claude remains a planned terminal adapter", WorkflowCatalog.target(.claudeCode).transport == .terminal && !WorkflowCatalog.target(.claudeCode).integrated)
+    check("halo extends 20 percent of the short edge", abs(SessionOrbit.haloExtent(width: 208, height: 86) - 17.2) < 0.001)
+    check("halo invalid geometry stays empty", SessionOrbit.haloExtent(width: .nan, height: 86) == 0 && SessionOrbit.haloExtent(width: -2, height: 86) == 0)
+    check("halo ends in transparency", SessionOrbit.haloOpacity(progress: 1) == 0 && SessionOrbit.haloOpacity(progress: .infinity) == 0)
+    var fade = true
+    for i in 0..<100 { fade = fade && SessionOrbit.haloOpacity(progress: Double(i)/100) > SessionOrbit.haloOpacity(progress: Double(i+1)/100) }
+    check("halo fades continuously outwards", fade)
 }
 
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")

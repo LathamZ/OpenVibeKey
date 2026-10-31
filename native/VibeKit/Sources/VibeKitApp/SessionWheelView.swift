@@ -5,16 +5,12 @@ import VibeKitHost
 struct SessionWheelView: View {
     @ObservedObject var controller: CodexWorkflowController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    private let ink = Color(wheelHex: "EDF3EF")
+    private let ink = Color.primary
     var body: some View {
         GeometryReader { geometry in
             let scale = min(geometry.size.width / 1000, geometry.size.height / 680)
             ZStack {
                 SessionOrbitBackdrop(strength: controller.wheelGlassStrength).allowsHitTesting(false)
-                RadialGradient(colors: [Color(wheelHex: "152D34").opacity(reduceTransparency ? 0.98 : 0.82), Color(wheelHex: "192E35").opacity(0.64), .clear],
-                               center: .center, startRadius: 70, endRadius: 460)
-                    .allowsHitTesting(false)
                 ZStack {
                     Ellipse().stroke(ink.opacity(0.11), lineWidth: 1).frame(width: 650, height: 300).position(x: 500, y: 325)
                     centerInformation.position(x: 500, y: 310)
@@ -41,7 +37,7 @@ struct SessionWheelView: View {
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }.frame(width: controller.wheelPanelSize.width, height: controller.wheelPanelSize.height)
-            .background(Color.clear).preferredColorScheme(.dark)
+            .background(Color.clear).preferredColorScheme(.light)
     }
     private var centerInformation: some View {
         VStack(spacing: 11) {
@@ -88,15 +84,25 @@ private struct OrbitCards: View, Animatable {
                 HStack(spacing: 7) {
                     Circle().fill(Color(wheelHex: controller.colorHex(session.id))).frame(width: 6, height: 6)
                     Text(controller.project(session.id)).font(.system(size: 9)).lineLimit(1)
-                }.foregroundStyle(selected ? Color(wheelHex: "6A8076") : Color(wheelHex: "9BAFB2"))
+                }.foregroundStyle(.secondary)
                 Text(session.title).font(.system(size: 13, weight: selected ? .semibold : .medium))
                     .lineLimit(selected ? 2 : 1).multilineTextAlignment(.leading)
-                    .foregroundStyle(selected ? Color(wheelHex: "203C34") : Color(wheelHex: "EAF0ED"))
+                    .foregroundStyle(.primary)
                 Spacer(minLength: 0)
             }.padding(.horizontal, 18).padding(.vertical, 14).frame(width: 208, height: 86, alignment: .topLeading)
-                .background(selected ? Color(wheelHex: "E7EEE8") : Color(wheelHex: "293B43").opacity(0.96), in: RoundedRectangle(cornerRadius: 15))
-                .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(selected ? .white.opacity(0.75) : .white.opacity(0.16), lineWidth: 1))
-                .shadow(color: .black.opacity(selected ? 0.23 : 0.12), radius: selected ? 16 : 8, y: selected ? 12 : 5)
+                .background {
+                    SessionOrbitBackdrop(strength: 0.72, card: true)
+                        .clipShape(RoundedRectangle(cornerRadius: 15)).allowsHitTesting(false)
+                }
+                .overlay(RoundedRectangle(cornerRadius: 15)
+                    .strokeBorder(selected ? Color(wheelHex: controller.selectorHaloHex).opacity(0.65) : Color.primary.opacity(0.12), lineWidth: selected ? 1 : 0.6))
+                .background {
+                    if selected {
+                        OrbitSelectionHalo(color: Color(wheelHex: controller.selectorHaloHex), width: 208, height: 86)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
         }.buttonStyle(.plain).disabled(controller.selectorLoading || controller.pageRoutingBusy)
             .help(session.title).accessibilityLabel(session.title).accessibilityValue(selected ? "已选中" : "未选中")
             .contextMenu {
@@ -106,6 +112,28 @@ private struct OrbitCards: View, Animatable {
                     }
                 }
             }
+    }
+}
+
+/// Outside-only light field. The card itself stays glass; fade reaches zero at 20% of its short edge.
+private struct OrbitSelectionHalo: View {
+    let color: Color
+    let width: Double
+    let height: Double
+    var body: some View {
+        let extent = SessionOrbit.haloExtent(width: width, height: height)
+        Canvas { context, size in
+            let core = CGRect(x: extent, y: extent, width: width, height: height)
+            let bands = 48
+            for i in 0..<bands {
+                let distance = (Double(i) + 0.5) / Double(bands) * extent
+                let rectangle = core.insetBy(dx: -distance, dy: -distance)
+                let path = Path(roundedRect: rectangle, cornerRadius: 15 + distance)
+                context.stroke(path, with: .color(color.opacity(SessionOrbit.haloOpacity(progress: distance / extent))),
+                               lineWidth: extent / Double(bands) + 0.4)
+            }
+        }.frame(width: width + extent * 2, height: height + extent * 2)
+            .accessibilityHidden(true)
     }
 }
 
@@ -130,7 +158,7 @@ struct WheelSensitivitySettings: View {
                     .accessibilityLabel("局部玻璃浓度")
                 Text("\(Int(controller.wheelGlassStrength * 100))%").font(.caption.monospacedDigit()).frame(width: 40)
             }
-            Text("仅在轨道区域渐变模糊；系统“降低透明度”开启时使用清晰背景。")
+            Text("仅在轨道区域渐变模糊；系统“降低透明度”开启时使用系统不透明材质。")
                 .font(.caption).foregroundStyle(.secondary)
             Text("只影响会话选择，不改变文字左右移动或正文翻页。吸附为视觉效果。")
                 .font(.caption).foregroundStyle(.secondary)

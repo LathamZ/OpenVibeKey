@@ -3,7 +3,7 @@ import Foundation
 /// Application identity and capabilities are separate from shared hardware gestures.
 /// Planned adapters never dispatch target-app commands.
 public enum WorkflowTargetID: String, CaseIterable, Identifiable, Sendable {
-    case codex, deepSeek, weChat
+    case codex, deepSeek, claudeCode, weChat
     public var id: String { rawValue }
 }
 public enum WorkflowCapability: String, CaseIterable, Hashable, Sendable {
@@ -19,6 +19,15 @@ public struct WorkflowDescriptor: Identifiable, Sendable {
     public let capabilities: Set<WorkflowCapability>
     public let detail: String
     public let nextStep: String
+    /// Presentation metadata never grants an adapter any dispatch capability.
+    public var haloHex: String {
+        switch id {
+        case .codex: return "FFFFFF"
+        case .deepSeek: return "4176E6"
+        case .claudeCode: return "D97757"
+        case .weChat: return "07C160"
+        }
+    }
 }
 public enum WorkflowCatalog {
     public static let targets: [WorkflowDescriptor] = [
@@ -29,6 +38,9 @@ public enum WorkflowCatalog {
         .init(id: .deepSeek, name: "DeepSeek Harness", symbol: "sparkles", transport: .native, integrated: false,
               capabilities: [], detail: "已确认使用本机 DeepSeek Harness；适配其具体会话和窗口。",
               nextStep: "验证会话列表、窗口定位和输入框聚焦。"),
+        .init(id: .claudeCode, name: "Claude Code", symbol: "chevron.left.forwardslash.chevron.right", transport: .terminal, integrated: false,
+              capabilities: [], detail: "恢复到支持规划，使用 Herdr／终端中的 Claude Code；尚未接入会话和按键动作。",
+              nextStep: "先验证可用会话接口、终端实例定位和输入焦点。"),
         .init(id: .weChat, name: "微信", symbol: "message", transport: .native, integrated: false,
               capabilities: [], detail: "复用会话、输入、浏览交互；不套用 AI 任务的停止／继续语义。",
               nextStep: "先验证会话定位和输入焦点，再评估其他能力。")

@@ -2,7 +2,14 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.1
+## 1.0.0-preview.2
+
+- Neutral system glass across the orbit and every conversation card; no injected teal field or colored card fill.
+- Selected card has an outward-only halo fading to zero at 20% of the card's short edge: Codex white, DeepSeek blue, Claude orange.
+- Claude Code is restored to the adapter roadmap; its sessions/actions are not implemented by this visual update.
+- Color references verified on the official homepages: https://www.deepseek.com (#4176E6), https://claude.com (#D97757). Presentation metadata never enables an adapter capability.
+
+## Previous foundation (1.0.0-preview.1)
 
 - Native floating elliptical conversation orbit, eight items per page, recent activity first.
 - Continuous curve animation, depth ordering and nearest-item settling; Reduce Motion is respected.
@@ -10,10 +17,10 @@ A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), li
 - Local feathered system backdrop with adjustable glass strength; Reduce Transparency disables compositor blur.
 - Quiet success and mode switching; instructions live in the dedicated 高效使用 settings page.
 - Existing device mapping, automatic navigation startup/reconnect recovery and original-key restoration retained.
-- App catalog limited to Codex, DeepSeek Harness and WeChat. Only the existing Codex path is integrated; the others remain pending.
+- App catalog now includes Codex, DeepSeek Harness, Claude Code and WeChat. Only the existing Codex path is integrated; the others remain pending.
 - Same internal bundle identifier and signing identity as the previous personal Dev app, preserving the configuration domain. Do not run the official app or the old Dev build concurrently.
 
-This release implements the orbit UI. It does not implement the entire v0.2 proposal. New chat creation, model/function navigation, universal stop/resume, complete regional focus and the other two adapters remain design work.
+This release implements the orbit UI. It does not implement the entire v0.2 proposal. New chat creation, model/function navigation, universal stop/resume, complete regional focus and the other adapters remain design work.
 
 ## Build
 

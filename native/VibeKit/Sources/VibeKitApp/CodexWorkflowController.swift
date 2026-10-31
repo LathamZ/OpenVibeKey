@@ -16,6 +16,14 @@ private final class SessionWheelPanel: NSPanel {
 @MainActor
 final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var navigation = CodexNavigation()
+    /// Live sessions currently come from the Codex adapter only. Other colors are fixture-previewable.
+    var selectorTarget: WorkflowTargetID {
+        guard preview, let index = CommandLine.arguments.firstIndex(of: "--preview-workflow"),
+              index + 1 < CommandLine.arguments.count,
+              let target = WorkflowTargetID(rawValue: CommandLine.arguments[index + 1]) else { return .codex }
+        return target
+    }
+    var selectorHaloHex: String { WorkflowCatalog.target(selectorTarget).haloHex }
     @Published private(set) var pinnedSessions: [CodexSession]
     @Published private(set) var recentThreads: [CodexThreadSummary] = []
     @Published private(set) var refreshing = false
@@ -533,6 +541,18 @@ func runCodexNavigationPreview() {
     app.setActivationPolicy(.regular)
     // A raw layout preview has no SwiftUI application loop yet. Finish native startup before key-window assertions.
     app.finishLaunching()
+    // Optional, entirely synthetic reference scene for real compositor/material inspection.
+    // It never reads another application's content or initializes the device backend.
+    var referenceWindow: NSWindow?
+    if CommandLine.arguments.contains("--preview-reference-backdrop") {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.title = "玻璃材质 · 合成参考背景"
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: OrbitReferenceScene())
+        window.center(); window.orderFront(nil)
+        referenceWindow = window
+    }
     let controller = CodexWorkflowController(defaults: UserDefaults(suiteName: "com.openvibekey.navigation-preview")!, preview: true)
     controller.enter()
     if let i = CommandLine.arguments.firstIndex(of: "--preview-wheel-page"), i + 1 < CommandLine.arguments.count,
@@ -571,7 +591,7 @@ func runCodexNavigationPreview() {
             }
         }
     }
-    withExtendedLifetime(controller) { app.run() }
+    withExtendedLifetime((controller, referenceWindow)) { app.run() }
 }
 
 func codexNavigationCLIURL() -> URL? {

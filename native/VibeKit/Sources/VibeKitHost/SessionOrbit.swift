@@ -13,6 +13,16 @@ public enum SessionOrbit {
                     scale: 0.78 + 0.26 * depth, opacity: 0.65 + 0.35 * depth, depth: depth)
     }
     public static func glass(_ raw: Double) -> Double { raw.isFinite ? min(1, max(0, raw)) : 0.7 }
+    public static let haloFraction = 0.20
+    public static func haloExtent(width: Double, height: Double) -> Double {
+        guard width.isFinite, height.isFinite else { return 0 }
+        return max(0, min(width, height)) * haloFraction
+    }
+    public static func haloOpacity(progress: Double) -> Double {
+        guard progress.isFinite else { return 0 }
+        let t = min(1, max(0, progress))
+        return 0.30 * (1 - t) * (1 - t)
+    }
     /// Alpha-only local backdrop; exact zero at every outside edge.
     public static func maskAlpha(x: Double, y: Double) -> Double {
         let radius = hypot((x - 0.5) / 0.5, (y - 0.5) / 0.5)
