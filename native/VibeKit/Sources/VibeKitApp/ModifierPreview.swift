@@ -7,7 +7,7 @@ private struct ModifierPreview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Open VibeKey · 左右修饰键").font(.headline)
+            Text("the Vibekey · 左右修饰键").font(.headline)
             ShortcutEditor(b: $state,
                            onApply: { state.current = state.tokens.joined(separator: "+") },
                            onClear: { state.mods = []; state.mainKey = nil; state.current = "未设置" })
@@ -22,7 +22,7 @@ func runModifierPreview() {
     app.setActivationPolicy(.regular)
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 200),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
-    window.title = "Open VibeKey Modifier Preview"
+    window.title = "the Vibekey Modifier Preview"
     window.contentView = NSHostingView(rootView: ModifierPreview())
     window.center()
     window.makeKeyAndOrderFront(nil)

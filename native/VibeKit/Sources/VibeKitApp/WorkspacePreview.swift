@@ -13,7 +13,7 @@ func runWorkspacePreview() {
     let mic = MicMeter()
     let host = NSHostingView(rootView: ContentView().environmentObject(vm).environmentObject(mic))
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-    window.title = "Open VibeKey · 界面预览"
+    window.title = "the Vibekey · 界面预览"
     window.contentView = host
     window.setContentSize(host.fittingSize)
     window.center(); window.makeKeyAndOrderFront(nil); app.activate(ignoringOtherApps: true)

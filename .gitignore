@@ -63,3 +63,7 @@ id_dsa
 /scripts/make-app.sh
 /scripts/notarize-app.sh
 /scripts/setup-dev-signing.sh
+
+# Reproducible iconutil intermediates (source artwork is scripts/make-brand-icon.swift)
+/assets/the-vibekey/*.iconset/
+/scripts/__pycache__/

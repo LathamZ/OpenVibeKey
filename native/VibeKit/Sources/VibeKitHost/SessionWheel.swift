@@ -105,5 +105,14 @@ public struct SessionWheelMotion {
         let value = position.rounded(.toNearestOrAwayFromZero).truncatingRemainder(dividingBy: Double(count))
         return start + Int((value + Double(count)).truncatingRemainder(dividingBy: Double(count)))
     }
+    public mutating func select(selection: Int) {
+        guard count > 0, (start..<(start + count)).contains(selection) else { return }
+        let target = Double(selection - start)
+        let period = Double(count)
+        var delta = (target - position).truncatingRemainder(dividingBy: period)
+        if delta > period / 2 { delta -= period }
+        if delta < -period / 2 { delta += period }
+        position += delta
+    }
     public mutating func settle() { position = position.rounded(.toNearestOrAwayFromZero) }
 }

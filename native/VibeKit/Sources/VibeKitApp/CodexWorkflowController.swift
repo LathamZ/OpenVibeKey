@@ -3,6 +3,12 @@ import SwiftUI
 import VibeKitHost
 
 private final class SessionWheelPanel: NSPanel {
+    var selectorKey: ((UInt16) -> Bool)?
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option])
+        if modifiers.isEmpty, selectorKey?(event.keyCode) == true { return }
+        super.keyDown(with: event)
+    }
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
@@ -27,6 +33,11 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     @Published private(set) var wheelPosition = 0.0
     @Published private(set) var wheelSnapping = false
     @Published private(set) var wheelStepsPerItem = 3.0
+    @Published private(set) var wheelGlassStrength = 0.7
+    func setWheelGlass(_ raw: Double) {
+        wheelGlassStrength = SessionOrbit.glass(raw)
+        if !preview { defaults.set(wheelGlassStrength, forKey: "sessionOrbit.glass.v1") }
+    }
     private var wheelMotion = SessionWheelMotion()
     private var wheelSettleTask: DispatchWorkItem?
     private let wheelStepsKey = "sessionWheel.stepsPerItem.v1"
@@ -54,7 +65,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private let openedKey = "sessionWheel.opened.v1"
     var wheelPanelSize: CGSize {
         let frame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 1000)
-        return CGSize(width: min(900, max(760, frame.width - 60)), height: min(790, max(640, frame.height - 70)))
+        return CGSize(width: min(1000, frame.width - 32), height: min(680, frame.height - 32))
     }
     var wheelPage: Int { SessionWheelPaging.page(selection: navigation.selection, count: navigation.candidates.count) }
     var wheelPageCount: Int { SessionWheelPaging.pageCount(navigation.candidates.count) }
@@ -118,7 +129,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
               NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex" else { return }
         rotaryEditing.toggle()
         refreshPhysicalFocusRoute()
-        showNotice("Codex：" + rotaryModeLabel + "；长按旋钮返回列表。")
+        // Silent mode switch; guidance lives in the dedicated help page.
     }
     @Published var pageRoutingBusy = false
     @Published var nativePageStatus = "选择层保持旋钮导航键位。"
@@ -146,6 +157,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         if !preview, let data = defaults.data(forKey: openedKey), let saved = try? JSONDecoder().decode([String: Double].self, from: data) { localOpened = saved.filter { $0.value.isFinite && $0.value >= 0 } }
         super.init()
         if !preview, let saved = defaults.object(forKey: wheelStepsKey) as? Double { wheelStepsPerItem = SessionWheelMotion.steps(saved) }
+        if !preview, let saved = defaults.object(forKey: "sessionOrbit.glass.v1") as? Double { wheelGlassStrength = SessionOrbit.glass(saved) }
         if preview, CommandLine.arguments.contains("--preview-many-sessions") {
             recentThreads = (1...19).map { i in
                 let id = String(format: "00000000-0000-0000-0000-%012d", i)
@@ -313,7 +325,16 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         }
         else { execute(navigation.rotate(delta)) }
     }
-    func choose(_ id: String) { if !selectorLoading, !pageRoutingBusy { navigation.select(id: id); resetWheelMotion() } }
+    func choose(_ id: String) {
+        guard !selectorLoading, !pageRoutingBusy else { return }
+        wheelSettleTask?.cancel(); wheelSettleTask = nil
+        let page = wheelPage
+        navigation.select(id: id)
+        if page == wheelPage {
+            wheelMotion.select(selection: navigation.selection)
+            wheelSnapping = true; wheelPosition = wheelMotion.position
+        } else { resetWheelMotion() }
+    }
     func suspend(message: String) {
         wheelSettleTask?.cancel(); wheelSettleTask = nil
         selectorGeneration = UUID()
@@ -360,7 +381,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                     self.message = self.nativeFocusConfigured
                         ? "已请求打开“\(session.title)”。再单击旋钮聚焦后，可用第三键退格；长按旋钮并松开返回列表（需输入监控）。"
                         : "已请求打开“\(session.title)”。原生聚焦未启用，请先在设置中完成手动绑定。"
-                    self.showNotice(self.message)
+                    // A successful open returns directly to the target; no intermediary notice.
                 } else { self.message = "打开请求失败，请重新选择。"; self.present() }
             }
         }
@@ -391,6 +412,19 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
             panel.isMovableByWindowBackground = true
             panel.isFloatingPanel = true; panel.becomesKeyOnlyIfNeeded = false
             panel.isReleasedWhenClosed = false; panel.level = .floating; panel.hidesOnDeactivate = false
+            panel.selectorKey = { [weak self] code in
+                guard let self, self.navigation.stage == .choosing else { return false }
+                switch code {
+                case 53: self.dismissSelector()
+                case 36, 76: self.gesture(.single, control: .dial)
+                case 123: self.rotate(-1)
+                case 124: self.rotate(1)
+                case 116: self.turnWheelPage(-1)
+                case 121: self.turnWheelPage(1)
+                default: return false
+                }
+                return true
+            }
             panel.delegate = self
             panel.contentView = NSHostingView(rootView: SessionWheelView(controller: self))
             panel.center(); self.panel = panel

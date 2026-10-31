@@ -83,6 +83,13 @@ struct VibeKitApp: App {
         if CommandLine.arguments.contains(DialPermissionProbe.microphoneArgument) {
             exit(AVCaptureDevice.authorizationStatus(for: .audio) == .authorized ? 0 : 1)
         }
+        // Rebrands and old Dev bundles share the same persistent identity. Never compete for HID.
+        if let bundleID = Bundle.main.bundleIdentifier,
+           let existing = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && !$0.isTerminated }) {
+            existing.activate(options: [.activateIgnoringOtherApps])
+            exit(0)
+        }
         ProfileNotifications.shared.configure()
         // 命令表自检：见 Task 1 的说明——加载失败不会崩溃，只会让写命令静默失败。
         let n = VibeKitCommands.specs.count
@@ -104,7 +111,7 @@ struct VibeKitApp: App {
         .menuBarExtraStyle(.window)     // 面板式，不是下拉菜单
 
         // Window 而非 WindowGroup：单实例，反复点「打开设置」不会开出多个窗。
-        Window("Open VibeKey", id: "settings") {
+        Window("the Vibekey", id: "settings") {
             ContentView()
                 .environmentObject(vm)
                 .environmentObject(mic)

@@ -21,7 +21,7 @@ final class ProfileNotifications: NSObject, UNUserNotificationCenterDelegate {
     func post(_ message: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }
         let content = UNMutableNotificationContent()
-        content.title = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Open VibeKey"
+        content.title = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "the Vibekey"
         content.body = message
         UNUserNotificationCenter.current().add(UNNotificationRequest(
             identifier: "profile-switch", content: content, trigger: nil)) { error in

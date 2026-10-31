@@ -3,16 +3,17 @@ import AppKit
 import VibeKitHost
 
 private enum WorkspacePage: String, CaseIterable, Identifiable {
-    case daily = "工作台", applications = "应用适配", device = "设备设置", access = "连接与权限"
+    case daily = "工作台", applications = "应用适配", device = "设备设置", help = "高效使用", access = "连接与权限"
     var id: String { rawValue }
     var symbol: String {
-        switch self { case .daily: return "rectangle.grid.2x2"; case .applications: return "square.stack.3d.up"; case .device: return "slider.horizontal.3"; case .access: return "checkmark.shield" }
+        switch self { case .daily: return "rectangle.grid.2x2"; case .applications: return "square.stack.3d.up"; case .device: return "slider.horizontal.3"; case .help: return "book.closed"; case .access: return "checkmark.shield" }
     }
     var subtitle: String {
         switch self {
         case .daily: return "把输入、浏览和会话切换放到手边。"
         case .applications: return "一套操作方式，适配不同应用。"
         case .device: return "调整按键、灯光和声音。"
+        case .help: return "熟悉之后，让操作保持安静。"
         case .access: return "启动时一次准备好，日常无需反复设置。"
         }
     }
@@ -35,9 +36,12 @@ struct WorkspaceShell<DeviceSettings: View>: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 26) {
                 HStack(spacing: 9) {
-                    Image(systemName: "dial.medium.fill").font(.title2).foregroundStyle(Color.accentColor)
+                    Group {
+                        if let icon = NSImage(named: NSImage.Name("AppIcon")) { Image(nsImage: icon).resizable().scaledToFit() }
+                        else { Image(systemName: "dial.medium.fill") }
+                    }.frame(width: 34, height: 34)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("VibeKey").font(.system(size: 20, weight: .semibold, design: .rounded))
+                        Text("the Vibekey").font(.system(size: 19, weight: .semibold, design: .rounded))
                         Text("输入与会话").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(.top, 10)
@@ -56,7 +60,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                     Label(vm.connected ? "AU05 已连接" : vm.linkPresent ? "等待设备回应" : "设备未连接", systemImage: vm.connected ? "checkmark.circle.fill" : "cable.connector")
                         .font(.caption).foregroundStyle(vm.connected ? Color.green : Color.secondary)
                     if vm.connected { Text(vm.charging ? "正在充电 · " + vm.battery : vm.battery).font(.caption).foregroundStyle(.secondary) }
-                    Text("Dev · " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版"))
+                    Text( (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版"))
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
             }.padding(20).frame(width: 182).background(Color(nsColor: .controlBackgroundColor))
@@ -78,6 +82,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                         case .daily: daily
                         case .applications: applications
                         case .device: deviceSettings
+                        case .help: efficientUse
                         case .access: access
                         }
                     }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
@@ -178,6 +183,37 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                     Text("共同操作：选择会话 → 编辑输入 ⇄ 浏览内容 → 返回会话列表") .font(.callout)
                     Text("每个应用只提供已经验证的能力；停止、继续和提交不做通用猜测。") .font(.caption).foregroundStyle(.secondary)
                 }
+            }
+        }
+    }
+    private var efficientUse: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            workspaceCard {
+                Text("选择会话").font(.headline)
+                actionRow("长按旋钮并松开", "呼出流动轨道")
+                actionRow("旋转", "移动轨道 · 停下吸附")
+                actionRow("短按旋钮", "打开选中会话")
+                hardwareRow("btn1", "上一页")
+                hardwareRow("btn2", "下一页")
+                hardwareRow("btn3", "取消并返回原会话")
+                Text("也可点选卡片，再按 Return 打开；Esc 取消。翻页可用 PageUp／PageDown。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            workspaceCard {
+                Text("编辑与浏览").font(.headline)
+                actionRow("会话内短按旋钮", "编辑 ⇄ 浏览")
+                actionRow("编辑时旋转", "光标 ← ／ →")
+                actionRow("浏览时旋转", "PageUp ／ PageDown")
+                hardwareRow("btn3", "短按退格 · 按住连续退格")
+                Text("按钮 1、2 在会话外沿用你的设备键位。Codex 输入定位需在其设置中绑定 ⌃⌥⌘F12；正文翻页取决于当前焦点。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            workspaceCard {
+                Text("外观与手感").font(.headline)
+                Text("到“设备设置”调整每项需要的旋转格数和局部玻璃浓度。颜色按会话保存，可右键卡片选择，或在“管理会话”中自定义。")
+                    .font(.callout).foregroundStyle(.secondary)
+                Text("本版保留已经验证的按键流程。新建、模型导航、统一停止／继续及其他应用接入仍按评审方案推进。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }

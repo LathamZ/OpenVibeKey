@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and package a local Dev bundle; never install or launch it."""
+"""Build the Vibekey universal bundle; never install or launch it. Stable identity required."""
 import os
 import json
 from pathlib import Path
@@ -50,7 +50,12 @@ else:
     # Resolve once to the exact certificate instead of letting codesign choose by substring.
     identity = matches[0][0]
 
+architectures = os.environ.get("VIBEKEY_ARCHS", "arm64,x86_64").split(",")
+if not architectures or any(a not in ("arm64", "x86_64") for a in architectures):
+    raise SystemExit("VIBEKEY_ARCHS must contain arm64 and/or x86_64")
 BUILD_ARGS = ["-c", "release"]
+for architecture in dict.fromkeys(architectures):
+    BUILD_ARGS += ["--arch", architecture]
 if os.environ.get("VIBEKEY_BUILD_PATH"):
     BUILD_ARGS += ["--scratch-path", os.environ["VIBEKEY_BUILD_PATH"]]
 
@@ -59,7 +64,7 @@ def swift(*args):
 
 subprocess.run(["swift", "build", *BUILD_ARGS], cwd=PACKAGE, check=True)
 bin_dir = Path(swift("--show-bin-path"))
-app = ROOT / "dist/Open VibeKey Dev.app"
+app = Path(os.environ.get("VIBEKEY_APP_OUTPUT", str(ROOT / "dist/the Vibekey.app")))
 if app.exists():
     raise SystemExit(f"Output already exists; move it aside first: {app}")
 resources = app / "Contents/Resources"
@@ -71,17 +76,22 @@ for bundle in bin_dir.glob("*.bundle"):
     shutil.copytree(bundle, resources / bundle.name)
 for locale in (ROOT / "scripts/app-localizations").glob("*.lproj"):
     shutil.copytree(locale, resources / locale.name)
-bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "27")
+bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "28")
 if not bundle_build.isdecimal() or int(bundle_build) <= 0:
     raise SystemExit("VIBEKEY_BUNDLE_BUILD must be a positive integer")
 info = {
-    "CFBundleName": "Open VibeKey Dev", "CFBundleDisplayName": "Open VibeKey Dev",
+    "CFBundleName": "the Vibekey", "CFBundleDisplayName": "the Vibekey",
+    "CFBundleIconFile": "AppIcon.icns",
     "CFBundleIdentifier": "com.openvibekey.app.dev", "CFBundleExecutable": "VibeKitApp",
-    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1.6-lr.18",
+    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0.0-preview.1",
     "CFBundleVersion": bundle_build, "LSMinimumSystemVersion": "13.0", "LSUIElement": True,
     "NSHighResolutionCapable": True, "CFBundleDevelopmentRegion": "en",
     "NSMicrophoneUsageDescription": "Display live input levels for your VibeKey microphone.",
 }
+# Keep the existing application identifier and signing identity for local upgrade continuity.
+# A clean recipient Mac receives no profiles, chats, permission databases, or private signing keys.
+shutil.copy2(ROOT / "assets/the-vibekey/AppIcon.icns", resources / "AppIcon.icns")
+shutil.copy2(ROOT / "LICENSE", resources / "UPSTREAM-LICENSE.txt")
 with (app / "Contents/Info.plist").open("wb") as output:
     plistlib.dump(info, output)
 subprocess.run(["codesign", "--force", "--deep", "--sign", identity,

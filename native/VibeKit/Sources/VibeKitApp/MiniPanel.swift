@@ -118,7 +118,7 @@ struct MiniPanel: View {
                     // 不影响其余功能），可接受。
                     dismiss()
                 }
-                menuRow(icon: "power", title: L("退出 Open VibeKey")) { AppLifecycle.requestQuit() }
+                menuRow(icon: "power", title: L("退出 the Vibekey")) { AppLifecycle.requestQuit() }
             }
         }
         .padding(12).frame(width: 288)

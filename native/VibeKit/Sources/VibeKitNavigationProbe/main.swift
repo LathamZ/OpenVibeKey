@@ -295,7 +295,7 @@ do {
   check("owned slots alone are protected",!WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:true))
   check("paused navigation permits manual key editing",WorkflowDefaults.canEdit(slot:id,navigationOwnsHardware:false))
  }
- check("catalog has five distinct applications",WorkflowCatalog.targets.count == 5 && Set(WorkflowCatalog.targets.map(\.id)).count == 5)
+ check("catalog has exactly the three approved applications",WorkflowCatalog.targets.count == 3 && Set(WorkflowCatalog.targets.map(\.id)) == Set([.codex, .deepSeek, .weChat]))
  check("Codex retains real session capability",WorkflowCatalog.supports(.conversations,in:.codex))
  for id in WorkflowTargetID.allCases where id != .codex {
   check("planned adapter is never treated as integrated",!WorkflowCatalog.target(id).integrated)
@@ -469,6 +469,48 @@ do {
     check("after verified legacy restore navigation has priority", NavigationStartupGate.dialPriority(automatic:true,diagnostic:false,hasRestore:savedLegacyOriginal) == .navigation)
     check("previously blocked startup automatically re-arms after restore", gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
     check("failed capture cannot retry each heartbeat", !gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
+}
+
+// Curve, wrap continuity, clear center and strictly local backdrop geometry.
+do {
+    let front = SessionOrbit.pose(index: 0, position: 0, count: 8)
+    check("orbit selected card rests at front", abs(front.x - 500) < 0.001 && abs(front.y - 475) < 0.001 && front.depth == 1)
+    let back = SessionOrbit.pose(index: 4, position: 0, count: 8)
+    check("orbit back recedes", back.scale < front.scale && back.opacity < front.opacity && back.depth == 0)
+    var periodic = true, contained = true, clearCenter = true
+    for count in 1...8 {
+        for tick in 0..<(count * 100) {
+            let position = Double(tick) / 100
+            for index in 0..<count {
+                let p = SessionOrbit.pose(index: index, position: position, count: count)
+                let q = SessionOrbit.pose(index: index, position: position + Double(count), count: count)
+                periodic = periodic && abs(p.x-q.x) < 0.0001 && abs(p.y-q.y) < 0.0001
+                contained = contained && p.x - 104*p.scale >= 0 && p.x + 104*p.scale <= 1000 && p.y-43*p.scale >= 0 && p.y+43*p.scale <= 680
+                let overlaps = p.x-104*p.scale < 630 && p.x+104*p.scale > 370 && p.y-43*p.scale < 366 && p.y+43*p.scale > 254
+                clearCenter = clearCenter && !overlaps
+            }
+        }
+    }
+    check("orbit seamless over every page size", periodic)
+    check("all moving cards stay within canvas", contained)
+    check("moving cards never overlap central information", clearCenter)
+    var feather = true, edge = true
+    for i in 0...100 {
+        let x = Double(i)/100
+        feather = feather && SessionOrbit.maskAlpha(x: 0.5 + x*0.5, y: 0.5) >= SessionOrbit.maskAlpha(x: 0.5 + min(1,x+0.01)*0.5, y: 0.5)
+        edge = edge && SessionOrbit.maskAlpha(x: x, y: 0) == 0 && SessionOrbit.maskAlpha(x: x, y: 1) == 0 && SessionOrbit.maskAlpha(x: 0, y: x) == 0 && SessionOrbit.maskAlpha(x: 1, y: x) == 0
+    }
+    check("blur feather decreases monotonically", feather)
+    check("blur zero at all outer edges", edge)
+    check("backdrop strength validates non-finite input", SessionOrbit.glass(.nan) == 0.7 && SessionOrbit.glass(-1) == 0 && SessionOrbit.glass(2) == 1)
+    var motion = SessionWheelMotion()
+    motion.reset(selection: 7, total: 8)
+    motion.select(selection: 0)
+    check("click next across seam takes short forward path", motion.position == 8 && motion.nearest == 0)
+    motion.select(selection: 7)
+    check("click previous across seam takes short backward path", motion.position == 7 && motion.nearest == 7)
+    motion.reset(selection: 8, total: 9); motion.select(selection: 0)
+    check("outside-page click cannot corrupt selection", motion.position == 0 && motion.nearest == 8)
 }
 
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
