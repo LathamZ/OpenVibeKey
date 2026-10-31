@@ -243,7 +243,7 @@ struct ContentView: View {
         let rows = vm.appBindingRows
         if !rows.isEmpty {
             Card(title: L("主机动作绑定"), systemImage: "bolt.horizontal.circle",
-                 subtitle: L("设备虽然没连上，但 the Vibekey 还在运行——下面这些组合键仍然被本程序全局截获。")) {
+                 subtitle: L("设备虽然没连上，但 The Vibekey 还在运行——下面这些组合键仍然被本程序全局截获。")) {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(rows) { r in
                         HStack(spacing: 10) {

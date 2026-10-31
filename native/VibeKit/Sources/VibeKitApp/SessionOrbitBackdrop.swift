@@ -1,37 +1,63 @@
 import AppKit
 import SwiftUI
+import QuartzCore
 import VibeKitHost
 
-/// Public compositor-backed blur, masked locally. Never blurs unrelated desktop areas.
+/// Explicitly sized neutral backdrop; alpha is a separate, centered layer, never maskImage.
 struct SessionOrbitBackdrop: NSViewRepresentable {
     var strength: Double
     var card = false
     @Environment(\.colorScheme) private var colorScheme
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = card ? .popover : .underWindowBackground
-        view.blendingMode = .behindWindow
-        view.state = .active
-        // No application-color tint. Match SwiftUI text contrast to the neutral native material.
-        if !card { view.maskImage = Self.mask }
-        return view
+    func makeNSView(context: Context) -> OrbitMaterialView {
+        OrbitMaterialView(card: card)
     }
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
+    func updateNSView(_ view: OrbitMaterialView, context: Context) {
+        view.effect.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
         view.alphaValue = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : SessionOrbit.glass(strength)
+        view.needsLayout = true
     }
-    private static let mask: NSImage = {
+}
+
+final class OrbitMaterialView: NSView {
+    let effect = NSVisualEffectView()
+    private let feather = CALayer()
+    private let card: Bool
+    init(card: Bool) {
+        self.card = card
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        effect.material = card ? .popover : .underWindowBackground
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.maskImage = nil
+        effect.autoresizingMask = [.width, .height]
+        addSubview(effect)
+        if !card {
+            feather.contents = Self.featherImage
+            feather.contentsGravity = .resize
+            layer?.mask = feather
+        }
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+    override func layout() {
+        super.layout()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        effect.frame = bounds
+        if !card { feather.frame = bounds }
+        CATransaction.commit()
+    }
+    private static let featherImage: CGImage = {
         let size = 512
-        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8,
-                                      samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: size * 4, bitsPerPixel: 32)!
-        let data = bitmap.bitmapData!
+        var bytes = [UInt8](repeating: 0, count: size * size * 4)
         for y in 0..<size { for x in 0..<size {
-            let offset = y * bitmap.bytesPerRow + x * 4
-            data[offset] = 0; data[offset + 1] = 0; data[offset + 2] = 0
-            data[offset + 3] = UInt8((SessionOrbit.maskAlpha(x: Double(x) / Double(size - 1), y: Double(y) / Double(size - 1)) * 255).rounded())
+            bytes[(y * size + x) * 4 + 3] = UInt8((SessionOrbit.maskAlpha(x: Double(x) / Double(size - 1), y: Double(y) / Double(size - 1)) * 255).rounded())
         } }
-        let image = NSImage(size: NSSize(width: size, height: size)); image.addRepresentation(bitmap)
-        return image
+        let provider = CGDataProvider(data: Data(bytes) as CFData)!
+        return CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 32,
+                       bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)!
     }()
 }
 

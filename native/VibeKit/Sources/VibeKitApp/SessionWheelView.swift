@@ -5,15 +5,19 @@ import VibeKitHost
 struct SessionWheelView: View {
     @ObservedObject var controller: CodexWorkflowController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let ink = Color.primary
+    private let ink = Color.white
     var body: some View {
         GeometryReader { geometry in
             let scale = min(geometry.size.width / 1000, geometry.size.height / 680)
             ZStack {
-                SessionOrbitBackdrop(strength: controller.wheelGlassStrength).allowsHitTesting(false)
                 ZStack {
-                    Ellipse().stroke(ink.opacity(0.11), lineWidth: 1).frame(width: 650, height: 300).position(x: 500, y: 325)
-                    centerInformation.position(x: 500, y: 310)
+                    ZStack {
+                        SessionOrbitBackdrop(strength: controller.wheelGlassStrength, card: true)
+                        Color(wheelHex: controller.selectorHaloHex).opacity(controller.wheelTintOpacity)
+                    }.frame(width: 650, height: 300)
+                        .mask { OrbitEllipseFade() }
+                        .allowsHitTesting(false).position(x: 500, y: 325)
+                    centerInformation.position(x: 500, y: 325)
                     OrbitCards(controller: controller, position: controller.wheelPosition)
                         .id(controller.wheelRange.lowerBound)
                         .animation(reduceMotion ? nil : controller.wheelSnapping ? .spring(response: 0.40, dampingFraction: 0.82) : .easeOut(duration: 0.10), value: controller.wheelPosition)
@@ -24,20 +28,20 @@ struct SessionWheelView: View {
                             Text("\(controller.wheelPage + 1) / \(controller.wheelPageCount)").monospacedDigit()
                             Button { controller.turnWheelPage(1) } label: { Image(systemName: "chevron.right") }
                                 .help("下一页 · 按钮 2").accessibilityLabel("下一页")
-                        }.font(.system(size: 12)).foregroundStyle(ink.opacity(0.65)).buttonStyle(.plain)
+                        }.font(.system(size: 12)).foregroundStyle(ink.opacity(0.85)).shadow(color: .black.opacity(0.7), radius: 2, y: 1).buttonStyle(.plain)
                             .disabled(controller.pageRoutingBusy || controller.selectorLoading).position(x: 500, y: 569)
                     }
                     Button { controller.dismissSelector() } label: {
                         Image(systemName: "xmark").font(.system(size: 11, weight: .medium)).padding(10)
                             .background(ink.opacity(0.06), in: Circle())
-                    }.foregroundStyle(ink.opacity(0.65)).buttonStyle(.plain)
+                    }.foregroundStyle(ink.opacity(0.85)).shadow(color: .black.opacity(0.7), radius: 2, y: 1).buttonStyle(.plain)
                         .help("取消 · 按钮 3").accessibilityLabel("取消会话选择")
                         .disabled(controller.pageRoutingBusy).position(x: 500, y: 614)
                 }.frame(width: 1000, height: 680).scaleEffect(scale)
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }.frame(width: controller.wheelPanelSize.width, height: controller.wheelPanelSize.height)
-            .background(Color.clear).preferredColorScheme(.light)
+            .background(Color.clear).preferredColorScheme(.dark)
     }
     private var centerInformation: some View {
         VStack(spacing: 11) {
@@ -52,17 +56,28 @@ struct SessionWheelView: View {
                     .lineLimit(3).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }
             if let error = controller.refreshError {
-                Text(error).font(.system(size: 11)).foregroundStyle(Color(wheelHex: "FFD9A3")).lineLimit(3)
+                Text(error).font(.system(size: 11)).foregroundStyle(.white).lineLimit(3)
                 Button("重试") { controller.refreshSessions(replaceSelector: true) }.buttonStyle(.plain)
             }
-        }.foregroundStyle(ink).frame(width: 260, height: 112)
+        }.foregroundStyle(.white).shadow(color: .black.opacity(0.75), radius: 2, y: 1).frame(width: 228, height: 112)
             .accessibilityElement(children: .combine)
+    }
+}
+
+/// Alpha-only ellipse: the final 15% fades to zero at the former orbit outline.
+private struct OrbitEllipseFade: View {
+    var body: some View {
+        RadialGradient(stops: [.init(color: .white, location: 0), .init(color: .white, location: 0.85), .init(color: .clear, location: 1)],
+                       center: .center, startRadius: 0, endRadius: 325)
+            .frame(width: 650, height: 650)
+            .scaleEffect(x: 1, y: 300.0 / 650.0)
+            .frame(width: 650, height: 300).clipped()
     }
 }
 
 /// Geometry is recalculated at every animated position, so cards follow a curve, not a chord.
 private struct OrbitCards: View, Animatable {
-    var controller: CodexWorkflowController
+    @ObservedObject var controller: CodexWorkflowController
     var position: Double
     var animatableData: Double { get { position } set { position = newValue } }
     var body: some View {
@@ -84,18 +99,22 @@ private struct OrbitCards: View, Animatable {
                 HStack(spacing: 7) {
                     Circle().fill(Color(wheelHex: controller.colorHex(session.id))).frame(width: 6, height: 6)
                     Text(controller.project(session.id)).font(.system(size: 9)).lineLimit(1)
-                }.foregroundStyle(.secondary)
+                }.foregroundStyle(Color.white.opacity(0.76))
                 Text(session.title).font(.system(size: 13, weight: selected ? .semibold : .medium))
+                    .shadow(color: .black.opacity(0.7), radius: 1.5, y: 1)
                     .lineLimit(selected ? 2 : 1).multilineTextAlignment(.leading)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                 Spacer(minLength: 0)
             }.padding(.horizontal, 18).padding(.vertical, 14).frame(width: 208, height: 86, alignment: .topLeading)
                 .background {
-                    SessionOrbitBackdrop(strength: 0.72, card: true)
-                        .clipShape(RoundedRectangle(cornerRadius: 15)).allowsHitTesting(false)
+                    ZStack {
+                        SessionOrbitBackdrop(strength: controller.wheelGlassStrength, card: true)
+                        RoundedRectangle(cornerRadius: 15)
+                            .fill(Color(wheelHex: controller.selectorHaloHex).opacity(min(1, controller.wheelTintOpacity * (selected ? 1.4666667 : 0.7333333))))
+                    }.clipShape(RoundedRectangle(cornerRadius: 15)).allowsHitTesting(false)
                 }
                 .overlay(RoundedRectangle(cornerRadius: 15)
-                    .strokeBorder(selected ? Color(wheelHex: controller.selectorHaloHex).opacity(0.65) : Color.primary.opacity(0.12), lineWidth: selected ? 1 : 0.6))
+                    .strokeBorder(selected ? Color(wheelHex: controller.selectorHaloHex).opacity(0.65) : Color.white.opacity(0.18), lineWidth: selected ? 1 : 0.6))
                 .background {
                     if selected {
                         OrbitSelectionHalo(color: Color(wheelHex: controller.selectorHaloHex), width: 208, height: 86)
@@ -158,7 +177,15 @@ struct WheelSensitivitySettings: View {
                     .accessibilityLabel("局部玻璃浓度")
                 Text("\(Int(controller.wheelGlassStrength * 100))%").font(.caption.monospacedDigit()).frame(width: 40)
             }
-            Text("仅在轨道区域渐变模糊；系统“降低透明度”开启时使用系统不透明材质。")
+            HStack {
+                Text("底色透明度").font(.callout)
+                Slider(value: Binding(get: { 1 - controller.wheelTintOpacity }, set: { controller.setWheelTintOpacity(1 - $0) }), in: 0...1)
+                    .accessibilityLabel("底色透明度")
+                Text("\(Int((1 - controller.wheelTintOpacity) * 100))%").font(.caption.monospacedDigit()).frame(width: 40)
+            }
+            Text("100% 为完全透明底色；玻璃浓度单独调整。")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("同时调整会话卡片与中间椭圆区域；系统“降低透明度”开启时使用系统不透明材质。")
                 .font(.caption).foregroundStyle(.secondary)
             Text("只影响会话选择，不改变文字左右移动或正文翻页。吸附为视觉效果。")
                 .font(.caption).foregroundStyle(.secondary)
@@ -207,6 +234,15 @@ func runWheelPersistenceCheck(outputPath: String) -> Int32 {
     checks["glass_strength_lower_bound"] = fourth.wheelGlassStrength == 0
     fourth.setWheelGlass(2)
     checks["glass_strength_upper_bound"] = fourth.wheelGlassStrength == 1
+    fourth.setWheelTintOpacity(0.15)
+    let fifth = CodexWorkflowController(defaults: defaults)
+    checks["tint_opacity_survives_recreation"] = fifth.wheelTintOpacity == 0.15
+    fifth.setWheelTintOpacity(.nan)
+    checks["invalid_tint_opacity_is_safe"] = fifth.wheelTintOpacity == 0.075
+    fifth.setWheelTintOpacity(-1)
+    checks["tint_can_be_fully_transparent"] = fifth.wheelTintOpacity == 0
+    fifth.setWheelTintOpacity(2)
+    checks["tint_opacity_clamped"] = fifth.wheelTintOpacity == 1
     let passed = checks.values.allSatisfy { $0 }
     let result: [String: Any] = ["passed": passed, "checks": checks, "hardware_started": false, "target_app_control": false, "isolated_preferences": true]
     do { try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: outputPath)) }

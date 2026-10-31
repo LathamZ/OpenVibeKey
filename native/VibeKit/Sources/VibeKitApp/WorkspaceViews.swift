@@ -41,7 +41,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                         else { Image(systemName: "dial.medium.fill") }
                     }.frame(width: 34, height: 34)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("the Vibekey").font(.system(size: 19, weight: .semibold, design: .rounded))
+                        Text("The Vibekey").font(.system(size: 19, weight: .semibold, design: .rounded))
                         Text("输入与会话").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(.top, 10)
@@ -144,7 +144,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                 }
                 HStack(spacing: 7) {
                     ForEach(WorkflowCatalog.targets) { target in
-                        Label(target.name, systemImage: target.symbol).font(.caption)
+                        Label { Text(target.name) } icon: { WorkflowAppIcon(target: target.id, size: 18) }.font(.caption)
                             .padding(.horizontal, 9).padding(.vertical, 7)
                             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
                     }
@@ -160,7 +160,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                 ForEach(WorkflowCatalog.targets) { target in
                     Button { selectedTarget = target.id } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: target.symbol).font(.title2).foregroundStyle(Color.accentColor).frame(width: 30)
+                            WorkflowAppIcon(target: target.id, size: 34)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(target.name).font(.headline)
                                 Text(target.integrated ? "已接入 · 实机体验待验收" : "待适配").font(.caption).foregroundStyle(.secondary)

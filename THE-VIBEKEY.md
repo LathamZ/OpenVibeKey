@@ -1,8 +1,18 @@
-# the Vibekey
+# The Vibekey
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.2
+## 1.0.0-preview.3
+
+- The application catalog uses bundled original product icons; attribution and exact source versions are in ICON-ATTRIBUTION.md.
+- All conversation selector text is explicitly white, including card titles and metadata; text shadows retain readability on bright content.
+- Replaces NSVisualEffectView.maskImage with an explicitly sized parent layer mask for the local backdrop. Intended to eliminate the stray upper-right material disc; native visual acceptance is recorded separately.
+- Product display name is The Vibekey. Bundle identity and signing certificate stay unchanged.
+- Light app-colored glass tint returns on cards and a 650×300pt central ellipse matching the orbit: Codex white, DeepSeek blue, Claude orange. The outline is removed; the outer 15% of the ellipse fades to zero. Card tint is 5.5–11%, central tint 7.5%; text remains white.
+- Orbit cards now observe asynchronous session-list changes directly, so the first loaded list appears without requiring a rotation.
+- Glass strength controls the materials. A separate persistent background-transparency control adjusts the app tint from opaque to fully transparent, initially 92.5% transparent; existing glass values are preserved.
+
+## Previous visual iteration (1.0.0-preview.2)
 
 - Neutral system glass across the orbit and every conversation card; no injected teal field or colored card fill.
 - Selected card has an outward-only halo fading to zero at 20% of the card's short edge: Codex white, DeepSeek blue, Claude orange.
@@ -30,7 +40,7 @@ Requires macOS, the Swift toolchain/Xcode and a pre-existing trusted code-signin
 swift scripts/make-brand-icon.swift assets/the-vibekey
 iconutil -c icns assets/the-vibekey/TheVibekey.iconset -o assets/the-vibekey/AppIcon.icns
 VIBEKEY_SIGN_IDENTITY='<exact existing certificate SHA-1>' python3 scripts/package-personal-dev.py
-python3 scripts/package-distribution.py --app 'dist/the Vibekey.app' --output 'dist/releases/1.0.0-preview.1'
+python3 scripts/package-distribution.py --app 'dist/The Vibekey.app' --output 'dist/releases/1.0.0-preview.1'
 ```
 
 The packaging script defaults to arm64 + x86_64, checks the stable signature and resource/modifier probes, and refuses to overwrite an existing bundle. Set VIBEKEY_BUILD_PATH for an external Swift scratch directory. VIBEKEY_ARCHS=arm64 is available for a local-only build. Personal configuration under ~/.config/openvibekey is a build-machine input only, never copied into the application.

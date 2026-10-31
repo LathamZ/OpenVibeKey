@@ -64,7 +64,7 @@ def swift(*args):
 
 subprocess.run(["swift", "build", *BUILD_ARGS], cwd=PACKAGE, check=True)
 bin_dir = Path(swift("--show-bin-path"))
-app = Path(os.environ.get("VIBEKEY_APP_OUTPUT", str(ROOT / "dist/the Vibekey.app")))
+app = Path(os.environ.get("VIBEKEY_APP_OUTPUT", str(ROOT / "dist/The Vibekey.app")))
 if app.exists():
     raise SystemExit(f"Output already exists; move it aside first: {app}")
 resources = app / "Contents/Resources"
@@ -76,14 +76,14 @@ for bundle in bin_dir.glob("*.bundle"):
     shutil.copytree(bundle, resources / bundle.name)
 for locale in (ROOT / "scripts/app-localizations").glob("*.lproj"):
     shutil.copytree(locale, resources / locale.name)
-bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "29")
+bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "32")
 if not bundle_build.isdecimal() or int(bundle_build) <= 0:
     raise SystemExit("VIBEKEY_BUNDLE_BUILD must be a positive integer")
 info = {
-    "CFBundleName": "the Vibekey", "CFBundleDisplayName": "the Vibekey",
+    "CFBundleName": "The Vibekey", "CFBundleDisplayName": "The Vibekey",
     "CFBundleIconFile": "AppIcon.icns",
     "CFBundleIdentifier": "com.openvibekey.app.dev", "CFBundleExecutable": "VibeKitApp",
-    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0.0-preview.2",
+    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0.0-preview.3",
     "CFBundleVersion": bundle_build, "LSMinimumSystemVersion": "13.0", "LSUIElement": True,
     "NSHighResolutionCapable": True, "CFBundleDevelopmentRegion": "en",
     "NSMicrophoneUsageDescription": "Display live input levels for your VibeKey microphone.",
@@ -92,6 +92,7 @@ info = {
 # A clean recipient Mac receives no profiles, chats, permission databases, or private signing keys.
 shutil.copy2(ROOT / "assets/the-vibekey/AppIcon.icns", resources / "AppIcon.icns")
 shutil.copy2(ROOT / "LICENSE", resources / "UPSTREAM-LICENSE.txt")
+shutil.copy2(ROOT / "ICON-ATTRIBUTION.md", resources / "ICON-ATTRIBUTION.md")
 with (app / "Contents/Info.plist").open("wb") as output:
     plistlib.dump(info, output)
 subprocess.run(["codesign", "--force", "--deep", "--sign", identity,
@@ -102,6 +103,6 @@ if identity != "-":
     requirement = subprocess.run(["codesign", "-dr", "-", str(app)], capture_output=True, text=True, check=True)
     if "Signature=adhoc" in signature.stderr or "designated => cdhash" in requirement.stdout + requirement.stderr:
         raise SystemExit("Stable signing check failed; do not install this bundle.")
-for flag in ["--resource-self-test", "--modifier-self-test"]:
+for flag in ["--resource-self-test", "--modifier-self-test", "--workflow-icon-self-test"]:
     subprocess.run([str(macos / "VibeKitApp"), flag], check=True)
 print(f"Packaged only; not installed or launched: {app}")

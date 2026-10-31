@@ -21,10 +21,10 @@ if output.exists():
 subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
 with (app/'Contents/Info.plist').open('rb') as stream:
     info = plistlib.load(stream)
-if info['CFBundleDisplayName'] != 'the Vibekey':
+if info['CFBundleDisplayName'] != 'The Vibekey':
     raise SystemExit('Unexpected application identity')
 output.mkdir(parents=True)
-staging = output/'the Vibekey'
+staging = output/'The Vibekey'
 staging.mkdir()
 shutil.copytree(app, staging/app.name, symlinks=True)
 (staging/'Applications').symlink_to('/Applications')
@@ -40,9 +40,9 @@ if args.public_certificate_dir:
         if not path.is_file() or path.is_symlink():
             raise SystemExit('Expected regular public certificate file missing: '+filename)
         shutil.copy2(path, dest/filename)
-(staging/'安装说明.txt').write_text('''the Vibekey · ''' + info['CFBundleShortVersionString'] + '''
+(staging/'安装说明.txt').write_text('''The Vibekey · ''' + info['CFBundleShortVersionString'] + '''
 
-1. 将 the Vibekey.app 拖到 Applications（应用程序）。支持 Apple Silicon 和 Intel，最低 macOS 13。
+1. 将 The Vibekey.app 拖到 Applications（应用程序）。支持 Apple Silicon 和 Intel，最低 macOS 13。
 2. 退出旧 Open VibeKey、Open VibeKey Dev 或其他同设备控制软件，再打开新版本。
 3. 这是 LathamZ Software Signing 自签名的个人预览包，未通过 Apple 公证。公钥证书在“公开签名证书”文件夹；请先通过可信渠道核对指纹。它不含私钥，不需要 P12。导入证书或设置信任不会自动通过 Gatekeeper，也不会自动授予隐私权限。若系统阻止运行，请核对来源后使用系统“隐私与安全性”提供的针对本 App 的“仍要打开”流程；不要关闭全局安全检查。无法放行时保留提示截图联系开发者。
 4. 首次启动按“连接与权限”页面完成辅助功能和输入监控。麦克风电平、通知为可选；另一台电脑的权限不能从本机迁移。连接 AU05 并唤醒后自动准备导航，无需手动勾选监听。
@@ -66,10 +66,10 @@ for path in staging.rglob('*'):
 version = info['CFBundleShortVersionString']
 architectures = subprocess.check_output(['lipo', '-archs', str(app/'Contents/MacOS/VibeKitApp')], text=True).split()
 architecture_label = 'universal' if set(architectures) == {'arm64', 'x86_64'} else '-'.join(architectures)
-zip_path = output/f'the-Vibekey-{version}-{architecture_label}.zip'
-dmg_path = output/f'the-Vibekey-{version}-{architecture_label}.dmg'
+zip_path = output/f'The-Vibekey-{version}-{architecture_label}.zip'
+dmg_path = output/f'The-Vibekey-{version}-{architecture_label}.dmg'
 subprocess.run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(staging), str(zip_path)], check=True)
-subprocess.run(['hdiutil', 'create', '-volname', 'the Vibekey', '-srcfolder', str(staging), '-format', 'UDZO', '-fs', 'HFS+', str(dmg_path)], check=True)
+subprocess.run(['hdiutil', 'create', '-volname', 'The Vibekey', '-srcfolder', str(staging), '-format', 'UDZO', '-fs', 'HFS+', str(dmg_path)], check=True)
 manifest = {'name':info['CFBundleDisplayName'],'version':version,'build':info['CFBundleVersion'],
             'architectures':architectures,'minimum_macos':info['LSMinimumSystemVersion'],
             'notarized':False,'recipient_installation_verified':False,

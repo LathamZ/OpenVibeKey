@@ -61,6 +61,11 @@ struct VibeKitApp: App {
             runCodexNavigationPreview()
             exit(0)
         }
+        if CommandLine.arguments.contains("--workflow-icon-self-test") {
+            let passed = WorkflowAppIcon.verifyBundledIcons()
+            print("Bundled original product icons: 4; valid: \(passed); no device or defaults writes")
+            exit(passed ? 0 : 1)
+        }
         if CommandLine.arguments.contains("--modifier-self-test") {
             exit(runModifierSelfTest())
         }
@@ -111,7 +116,7 @@ struct VibeKitApp: App {
         .menuBarExtraStyle(.window)     // 面板式，不是下拉菜单
 
         // Window 而非 WindowGroup：单实例，反复点「打开设置」不会开出多个窗。
-        Window("the Vibekey", id: "settings") {
+        Window("The Vibekey", id: "settings") {
             ContentView()
                 .environmentObject(vm)
                 .environmentObject(mic)
