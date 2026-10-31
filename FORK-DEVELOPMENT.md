@@ -6,7 +6,7 @@ MIT license and upstream attribution are retained. This is an experimental perso
 not an upstream release. The upstream README describes upstream behavior; this document
 covers the experimental workflow on `feat/codex-workflow`.
 
-Current design: [multi-application workspace](ARCHITECTURE.md), lr.17. A shared interaction
+Current design: [multi-application workspace](ARCHITECTURE.md), lr.18. A shared interaction
 model covers Codex, DeepSeek, Hugging Face, Claude Code and WeChat; only Codex has a runtime
 integration today. Other catalog entries remain explicitly pending.
 Confirmed targets: local DeepSeek Harness, HuggingChat in the browser, and Claude Code
@@ -58,7 +58,7 @@ swift run -c release VibeKitThreadListProbe
 swift run -c release VibeKitHostProbe
 ```
 
-The first two probes contain 747 navigation/paging/startup/recovery and 92 focus/hold checks at this
+The first two probes contain 788 navigation/paging/startup/recovery and 92 focus/hold checks at this
 snapshot; thread fixtures contain 28 checks and packaged modifier validation contains 41. Thread-list probes use a local Python fixture, not the real Codex account. The above
 probes do not change hardware settings. Focus/host probes temporarily register and release real
 Carbon hotkeys; run them in a normal desktop session with the device controller quit to avoid
@@ -270,3 +270,30 @@ icons identify the physical controls independently of their temporary actions.
 actual controller idle-timer/transparent-panel checks passed, along with native key-window/close
 checks and inspected full/partial/device-settings renders. The package retained the existing
 certificate-based requirement. A connected-device physical trial remains independent validation.
+
+
+## lr.18 automatic navigation after recovery and reconnect
+
+Navigation defaults on after verified device initialization. The old gate attempted only once
+per process; a later offline/online cycle restored the originals but never armed navigation
+again. A retained legacy dial-double-click recovery marker could also reinstall its own capture
+before navigation, keeping recovery blocked indefinitely. Both affected the rotary selector and
+native Backspace together even with valid permissions.
+
+Each observed connection boundary now grants one new bounded attempt, after device identity,
+original-key restoration and profile readback have succeeded. Automatic navigation has priority
+over legacy double-click capture. A saved legacy original is restored first, then navigation
+is prepared; the legacy capture is not reinstalled in between. Missing permission, unverified
+profile, corrupt journal or failed restoration still prevents arming. A failed capture does not
+retry on every heartbeat. An explicit pause remains paused across reconnects for this run;
+normal next launch keeps the default-on policy.
+
+788 pure navigation/startup/motion checks and 92 native focus/hold checks pass. The explicit
+`--navigation-reconnect-check <output>` operator diagnostic exercises real device readback and
+restoration through two VM offline/online callback cycles, explicit pause/reconnect, resume and
+normal quit. It does not unplug the receiver or simulate HID input, and is not an unattended
+unit test. `--require-legacy-restore` additionally verifies a retained original-key marker was
+consumed before automatic capture. Hardware-only diagnostics retain manual ownership.
+
+This fix retains the signing identity and privacy grants; it adds no always-on permission
+prompt, target-app accessibility automation or synthetic key event.

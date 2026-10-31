@@ -71,13 +71,13 @@ for bundle in bin_dir.glob("*.bundle"):
     shutil.copytree(bundle, resources / bundle.name)
 for locale in (ROOT / "scripts/app-localizations").glob("*.lproj"):
     shutil.copytree(locale, resources / locale.name)
-bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "26")
+bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "27")
 if not bundle_build.isdecimal() or int(bundle_build) <= 0:
     raise SystemExit("VIBEKEY_BUNDLE_BUILD must be a positive integer")
 info = {
     "CFBundleName": "Open VibeKey Dev", "CFBundleDisplayName": "Open VibeKey Dev",
     "CFBundleIdentifier": "com.openvibekey.app.dev", "CFBundleExecutable": "VibeKitApp",
-    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1.6-lr.17",
+    "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1.6-lr.18",
     "CFBundleVersion": bundle_build, "LSMinimumSystemVersion": "13.0", "LSUIElement": True,
     "NSHighResolutionCapable": True, "CFBundleDevelopmentRegion": "en",
     "NSMicrophoneUsageDescription": "Display live input levels for your VibeKey microphone.",

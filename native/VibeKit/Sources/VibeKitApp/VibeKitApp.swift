@@ -31,6 +31,10 @@ struct VibeKitApp: App {
         if CommandLine.arguments.contains(DialPermissionProbe.inputMonitoringArgument) {
             exit(IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted ? 0 : 1)
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--navigation-reconnect-check"), index + 1 < CommandLine.arguments.count {
+            runNavigationReconnectCheck(outputPath: CommandLine.arguments[index + 1])
+            exit(1)
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--navigation-startup-check"), index + 1 < CommandLine.arguments.count {
             runNavigationStartupCheck(outputPath:CommandLine.arguments[index + 1])
             exit(1)

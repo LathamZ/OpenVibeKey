@@ -237,10 +237,10 @@ do {
  check("waits for verified device",!gate.take(enabled:true,deviceReady:false,recoverySeen:false,diagnostic:false) && gate.pending)
  check("ready remembered on attempts once",gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false) && gate.attempted)
  check("no repeating auto-enable",!gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
- check("disconnect does not reset attempt",!gate.take(enabled:true,deviceReady:false,recoverySeen:false,diagnostic:false))
+ check("not-ready heartbeat alone does not reset attempt",!gate.take(enabled:true,deviceReady:false,recoverySeen:false,diagnostic:false))
  gate=NavigationStartupGate()
  check("crash recovery blocks auto replay",!gate.take(enabled:true,deviceReady:false,recoverySeen:true,diagnostic:false) && !gate.pending)
- check("recovery later succeeds still requires manual enable",!gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
+ check("recovery stays blocked until explicit verified rearm",!gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
  gate=NavigationStartupGate()
  check("diagnostic never takes normal startup intent",!gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:true) && !gate.attempted)
  gate=NavigationStartupGate();gate.cancel()
@@ -433,6 +433,42 @@ do {
     m.turn(Int.max, stepsPerItem: 3);m.settle();check("extreme input remains bounded valid", (0..<8).contains(m.nearest) && m.position.isFinite)
     check("sensitivity sanitized", SessionWheelMotion.steps(.nan) == 3 && SessionWheelMotion.steps(.infinity) == 3 && SessionWheelMotion.steps(-1) == 1 && SessionWheelMotion.steps(100) == 8)
     m.reset(selection: 0, total: 8);m.turn(1, stepsPerItem: 2);m.settle();check("halfway tie advances consistently", m.nearest == 1)
+}
+
+do {
+    var gate = NavigationStartupGate()
+    check("first ready connection enables", gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
+    for cycle in 1...3 {
+        gate.beginConnection()
+        check("connection waits for restoration", !gate.take(enabled:true,deviceReady:false,recoverySeen:true,diagnostic:false))
+        gate.beginConnection() // VM only re-arms here after device identity/profile/originals are verified.
+        check("verified reconnect arms once", gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
+        for _ in 0..<5 { check("heartbeat never repeats capture", !gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false)) }
+        check("reconnect attempt recorded", gate.attempted && !gate.pending)
+    }
+    gate.beginConnection()
+    check("explicit pause prevents reconnect auto-enable", !gate.take(enabled:false,deviceReady:true,recoverySeen:false,diagnostic:false))
+    gate.beginConnection()
+    check("hardware diagnostic never auto-arms", !gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:true))
+    for automatic in [false,true] {
+        for diagnostic in [false,true] {
+            for restore in [false,true] {
+                let route = NavigationStartupGate.dialPriority(automatic:automatic,diagnostic:diagnostic,hasRestore:restore)
+                if automatic && !diagnostic {
+                    check("automatic workflow never reclaims legacy capture", route != .legacyCapture)
+                    check("saved legacy original restored before navigation", route == (restore ? .restoreOriginal : .navigation))
+                } else { check("explicit pause and hardware diagnostics retain legacy behavior", route == .legacyCapture) }
+            }
+        }
+    }
+    var savedLegacyOriginal = true
+    gate = NavigationStartupGate(); gate.cancel() // recovery record at launch
+    check("legacy recovery chooses restore, not legacy recapture", NavigationStartupGate.dialPriority(automatic:true,diagnostic:false,hasRestore:savedLegacyOriginal) == .restoreOriginal)
+    savedLegacyOriginal = false
+    gate.beginConnection()
+    check("after verified legacy restore navigation has priority", NavigationStartupGate.dialPriority(automatic:true,diagnostic:false,hasRestore:savedLegacyOriginal) == .navigation)
+    check("previously blocked startup automatically re-arms after restore", gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
+    check("failed capture cannot retry each heartbeat", !gate.take(enabled:true,deviceReady:true,recoverySeen:false,diagnostic:false))
 }
 
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")

@@ -245,6 +245,10 @@ final class VibeVM: ObservableObject {
     private var navigationStartupRecoverySeen = false
     private var navigationStartupStateVerified = false
     var navigationStartupAttempted: Bool { navigationStartupGate.attempted }
+    private(set) var navigationAutomaticEnableCount = 0
+    var navigationDeviceInitializedForCheck: Bool {
+        connected && slotsHydrated && navigationStartupStateVerified && !applyingProfile && !dialGestureBusy && !codexWorkflow.busy
+    }
     private var navigationRecoveryCorrupt = false
     private var navigationOperation = UUID()
     private var navigationDial = PressGesture()
@@ -509,6 +513,11 @@ final class VibeVM: ObservableObject {
     // 在线→离线：AU05 关机但连接器仍在，清掉过期信息、退回等待态。
     private func goOffline() {
         navigationStartupStateVerified = false
+        defaults.removeObject(forKey: NavigationStartupGate.successPIDKey)
+        if navigationStartupEnabled {
+            navigationStartupRecoverySeen = true
+            navigationStartupGate.beginConnection()
+        }
         codexWorkflow.stop()
         cancelNativePageRouting()
         if navigationOwnsHardware { codexWorkflow.hasRecovery = true; codexWorkflow.message = "设备已断开；下次连接会先恢复原键位。" }
@@ -758,7 +767,7 @@ final class VibeVM: ObservableObject {
         if dialRestore != nil {
             navigationStartupRecoverySeen = true
             navigationStartupGate.cancel()
-            codexWorkflow.message = "检测到上次旋钮恢复记录，本次自动导航暂停；核对配置后请手动启用。"
+            codexWorkflow.message = "检测到上次旋钮恢复记录；核对并恢复原键位后自动准备导航。"
         }
         if let data = defaults.data(forKey: navigationRecoveryKey) {
             navigationStartupRecoverySeen = true
@@ -1595,7 +1604,14 @@ extension VibeVM {
         guard !quitting, !applyingProfile, connected, slotsHydrated, let device = dev,
               let index = slotIndex("dialP") else { return }
         let hadRestore = dialRestore != nil
-        let capture = prepareDialCapture()
+        let priority = NavigationStartupGate.dialPriority(automatic: navigationStartupEnabled,
+            diagnostic: CommandLine.arguments.contains("--navigation-hardware-check"), hasRestore: hadRestore)
+        if priority == .navigation {
+            attemptNavigationStartup()
+            return
+        }
+        // A saved legacy record is restored once before navigation; never reinstall legacy capture ahead of it.
+        let capture = priority == .restoreOriginal ? nil : prepareDialCapture()
         guard capture != nil || hadRestore else { return }
         let generation = UUID()
         dialGestureGeneration = generation
@@ -2020,6 +2036,7 @@ extension VibeVM {
                         if outcome == .installed, self.connected {
                             if remember { self.persistNavigationStartup(true) }
                             if !rememberChoice {
+                                self.navigationAutomaticEnableCount += 1
                                 self.defaults.set(Int(ProcessInfo.processInfo.processIdentifier), forKey: NavigationStartupGate.successPIDKey)
                                 self.defaults.synchronize()
                             }
@@ -2127,7 +2144,7 @@ extension VibeVM {
             !codexWorkflow.hasRecovery && navigationJournal == nil && !navigationRecoveryCorrupt
         if navigationStartupRecoverySeen, ready, navigationStartupEnabled, dialRestore == nil {
             navigationStartupRecoverySeen = false
-            navigationStartupGate = NavigationStartupGate()
+            navigationStartupGate.beginConnection()
         }
         if navigationStartupGate.take(enabled: navigationStartupEnabled, deviceReady: ready && PermissionCenter.shared.navigationReady,
             recoverySeen: navigationStartupRecoverySeen,
@@ -2207,5 +2224,18 @@ extension VibeVM {
             self?.codexWorkflow.pageRoutingBusy = false
             completion(ok)
         }
+    }
+}
+
+
+extension VibeVM {
+    /// Explicit integration check only. Runs the real offline/online restoration path on the same live device.
+    /// Does not fake HID input, disconnect hardware, open a chat or bypass permissions.
+    func checkNavigationConnectionCycle() -> Bool {
+        guard CommandLine.arguments.contains("--navigation-reconnect-check"), navigationDeviceInitializedForCheck,
+              !quitting, dev != nil else { return false }
+        goOffline()
+        goOnline()
+        return true
     }
 }
