@@ -2,7 +2,10 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 48)
+## 1.0.0-preview.5 (build 49)
+
+- Repeated long holds while the selector is already open preserve its highlight, page, snapshot and gesture/capture ownership; an outstanding confirmed open also keeps its request ID.
+- The central 650×300 ellipse now fades continuously from its center to its edge with a smooth falloff, replacing the solid inner 85% and short outer fade. Existing glass/tint preferences are retained.
 
 - Device Settings owns the rotary hold duration (0.20–2.00s, 0.05s increments; default 1.00s), selection sensitivity, glass strength and tint transparency. Duration changes persist and apply to the next press in both captured and pass-through paths.
 - Holding to the chosen duration opens the selector before release. Continued hold/repeat and the final release never confirm a conversation; timing changes during a press cancel that gesture until release.

@@ -513,6 +513,32 @@ do {
     check("outside-page click cannot corrupt selection", motion.position == 0 && motion.nearest == 8)
 }
 
+// Repeated long presses preserve selector state and outstanding confirmation requests.
+do {
+    let sessions = (1...12).map { CodexSession(reference: String(format: "00000000-0000-0000-0000-%012d", $0), title: "Fixture \($0)")! }
+    var n = CodexNavigation(); n.enter(sessions: sessions); n.turnWheelPage(1); n.select(id: sessions[10].id)
+    for _ in 0..<100 { _ = n.gesture(.long, control: .dial, sessions: Array(sessions.reversed())) }
+    check("long while choosing preserves snapshot and page", n.candidates == sessions && n.selection == 10 && n.stage == .choosing)
+    _ = n.gesture(.single, control: .dial, sessions: sessions)
+    let request = n.requestID
+    check("long while opening produces no new effect", n.gesture(.long, control: .dial, sessions: sessions).isEmpty)
+    check("long while opening preserves confirmation", n.requestID == request && n.stage == .opening)
+    n.dispatched(request: request!, session: sessions[10], accepted: true)
+    _ = n.gesture(.long, control: .dial, sessions: sessions)
+    check("long after confirmed open still returns to selector", n.stage == .choosing && n.selected?.id == sessions[10].id)
+    _ = n.gesture(.single, control: .exit, sessions: sessions)
+    check("exit after repeated hold still cancels", n.stage == .openRequested)
+    var monotonic = true
+    for i in 0..<1000 {
+        monotonic = monotonic && SessionOrbit.centerFadeAlpha(radius: Double(i)/1000) > SessionOrbit.centerFadeAlpha(radius: Double(i+1)/1000)
+    }
+    check("center fade decreases throughout entire radius", monotonic)
+    check("center fade begins before former rim", SessionOrbit.centerFadeAlpha(radius: 0.1) < 1 && SessionOrbit.centerFadeAlpha(radius: 0.5) == 0.5)
+    check("center fade has exact opaque center and transparent edge", SessionOrbit.centerFadeAlpha(radius: 0) == 1 && SessionOrbit.centerFadeAlpha(radius: 1) == 0)
+    check("center fade smooth at both endpoints", 1 - SessionOrbit.centerFadeAlpha(radius: 0.001) < 0.00001 && SessionOrbit.centerFadeAlpha(radius: 0.999) < 0.00001)
+    check("center fade rejects invalid radius", SessionOrbit.centerFadeAlpha(radius: .nan) == 0 && SessionOrbit.centerFadeAlpha(radius: .infinity) == 0)
+}
+
 // App identity colors and geometry stay independent of unimplemented adapter actions.
 do {
     check("Codex has white selection light", WorkflowCatalog.target(.codex).haloHex == "FFFFFF")

@@ -407,6 +407,10 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
     func enter(inferForeground: Bool = false) {
         guard (ready || preview), !switchingApplication else { return }
+        // An already-open selector owns the gesture/capture lease. Re-entering while
+        // the key is held must not reset its snapshot, animation or release barriers.
+        // Also preserve an in-flight confirmed open and its completion request ID.
+        guard navigation.stage != .choosing, navigation.stage != .opening else { return }
         if inferForeground, !preview, let target = WorkflowAppCycle.order.first(where: { $0.bundleID == NSWorkspace.shared.frontmostApplication?.bundleIdentifier }) { selectTarget(target) }
         guard WorkflowCatalog.supports(.conversations, in: activeTarget) else { return }
         selectorGeneration = UUID()
@@ -894,7 +898,39 @@ extension CodexWorkflowController {
         checks["card_highlight_is_not_disabled_by_device_preparation"] = c.navigation.selected?.id == explicit
         c.selectorLoading = true; let before = c.wheelPosition; c.rotate(1)
         checks["empty_initial_loading_does_not_choose_unknown_item"] = c.wheelPosition == before
-        c.pageRoutingBusy = false; c.selectorLoading = false; c.stop()
+        c.pageRoutingBusy = false; c.selectorLoading = false
+        c.selectorQuery = "Fixture"; c.selectorInteracted = true
+        let generation = c.selectorGeneration
+        let selectedID = c.navigation.selected?.id
+        let position = c.wheelPosition
+        let candidates = c.navigation.candidates
+        var cancellations = 0, captures = 0
+        c.cancelPendingGestures = { cancellations += 1 }
+        c.routePhysicalFocus = { _ in captures += 1; return false }
+        let repeatStart = ProcessInfo.processInfo.systemUptime
+        for _ in 0..<100 {
+            var press = PressGesture(longInterval: 0.2)
+            _ = press.press(at: 0)
+            for action in press.expire(at: 0.2) { c.gesture(action, control: .dial) }
+            checks["reentry_release_never_confirms"] = press.release(at: 0.3).isEmpty
+        }
+        checks["repeated_hold_preserves_selector_identity"] = c.selectorGeneration == generation
+        checks["repeated_hold_preserves_highlight_and_motion"] = c.navigation.selected?.id == selectedID && c.wheelPosition == position
+        checks["repeated_hold_preserves_query_snapshot_and_interaction"] = c.selectorQuery == "Fixture" && c.navigation.candidates == candidates && c.selectorInteracted
+        checks["repeated_hold_does_not_cancel_or_recapture"] = cancellations == 0 && captures == 0
+        checks["repeated_hold_keeps_selector_choosing"] = c.navigation.stage == .choosing
+        checks["100_repeated_holds_cpu_under_100ms"] = (ProcessInfo.processInfo.systemUptime - repeatStart) < 0.1
+        c.rotate(1)
+        checks["rotation_still_works_after_repeated_hold"] = c.wheelPosition != position
+        c.turnWheelPage(1)
+        let page = c.wheelPage, pageID = c.navigation.selected?.id
+        c.gesture(.long, control: .dial)
+        checks["repeated_hold_preserves_other_page"] = page == 1 && c.wheelPage == page && c.navigation.selected?.id == pageID
+        let effects = c.navigation.gesture(.single, control: .dial, sessions: candidates)
+        let request = c.navigation.requestID
+        c.gesture(.long, control: .dial)
+        checks["hold_during_confirmed_open_preserves_request"] = !effects.isEmpty && request != nil && c.navigation.stage == .opening && c.navigation.requestID == request
+        c.stop()
         let data: [String: Any] = ["checks": checks, "rotation_ms": elapsed, "hardware_or_target_UI_access": false]
         do { try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted,.sortedKeys]).write(to: URL(fileURLWithPath:path)) }
         catch { return 1 }

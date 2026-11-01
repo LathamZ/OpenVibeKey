@@ -64,10 +64,13 @@ struct SessionWheelView: View {
     }
 }
 
-/// Alpha-only ellipse: the final 15% fades to zero at the former orbit outline.
+/// Same 650×300 ellipse, with a smooth center-to-edge falloff across the full radius.
 private struct OrbitEllipseFade: View {
     var body: some View {
-        RadialGradient(stops: [.init(color: .white, location: 0), .init(color: .white, location: 0.85), .init(color: .clear, location: 1)],
+        RadialGradient(stops: (0...64).map { index in
+            let radius = Double(index) / 64
+            return .init(color: .white.opacity(SessionOrbit.centerFadeAlpha(radius: radius)), location: radius)
+        },
                        center: .center, startRadius: 0, endRadius: 325)
             .frame(width: 650, height: 650)
             .scaleEffect(x: 1, y: 300.0 / 650.0)

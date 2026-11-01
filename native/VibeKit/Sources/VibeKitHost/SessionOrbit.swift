@@ -13,6 +13,12 @@ public enum SessionOrbit {
                     scale: 0.78 + 0.26 * depth, opacity: 0.65 + 0.35 * depth, depth: depth)
     }
     public static func glass(_ raw: Double) -> Double { raw.isFinite ? min(1, max(0, raw)) : 0.7 }
+    /// Central ellipse fades over its entire radius; no solid plateau or hard rim.
+    public static func centerFadeAlpha(radius: Double) -> Double {
+        guard radius.isFinite else { return 0 }
+        let t = min(1, max(0, radius))
+        return 1 - t * t * (3 - 2 * t)
+    }
     public static let haloFraction = 0.20
     public static func haloExtent(width: Double, height: Double) -> Double {
         guard width.isFinite, height.isFinite else { return 0 }

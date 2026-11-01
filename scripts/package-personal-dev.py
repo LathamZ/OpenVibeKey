@@ -76,7 +76,7 @@ for bundle in bin_dir.glob("*.bundle"):
     shutil.copytree(bundle, resources / bundle.name)
 for locale in (ROOT / "scripts/app-localizations").glob("*.lproj"):
     shutil.copytree(locale, resources / locale.name)
-bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "48")
+bundle_build = os.environ.get("VIBEKEY_BUNDLE_BUILD", "49")
 if not bundle_build.isdecimal() or int(bundle_build) <= 0:
     raise SystemExit("VIBEKEY_BUNDLE_BUILD must be a positive integer")
 info = {

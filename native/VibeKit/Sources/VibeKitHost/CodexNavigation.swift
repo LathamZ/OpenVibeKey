@@ -70,7 +70,10 @@ public struct CodexNavigation {
         selection = i
     }
     public mutating func gesture(_ action: PressGesture.Action, control: Control, sessions: [CodexSession]) -> [Effect] {
-        if action == .long { enter(sessions: sessions); return [] }
+        if action == .long {
+            guard stage != .choosing, stage != .opening else { return [] }
+            enter(sessions: sessions); return []
+        }
         switch (control, action) {
         case (.dial, .double):
             return [.cycleApplication]
