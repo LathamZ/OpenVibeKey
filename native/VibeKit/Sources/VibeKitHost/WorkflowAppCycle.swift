@@ -17,7 +17,7 @@ public enum WorkflowAppCycle {
 public enum RotaryHoldTiming {
     public static let preferenceKey = "device.rotaryHoldInterval.v1"
     public static let defaultInterval: TimeInterval = 1.0
-    public static let range: ClosedRange<Double> = 0.4...2.0
+    public static let range: ClosedRange<Double> = 0.2...2.0
     public static let step = 0.05
     public static func normalized(_ raw: Double) -> Double {
         guard raw.isFinite else { return defaultInterval }

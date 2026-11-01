@@ -592,7 +592,7 @@ do {
     _ = g.edge(down:true,at:9,eligible:true); _ = g.edge(down:false,at:9.1,eligible:true)
     check("foreground change cancels pending single",g.expire(at:10,eligible:false).isEmpty && g.expire(at:11,eligible:true).isEmpty)
 }
-for interval in [0.4, 0.55, 0.65, 1.0, 1.55, 2.0] {
+for interval in [0.2, 0.25, 0.4, 0.55, 0.65, 1.0, 1.55, 2.0] {
     let value = RotaryHoldTiming.normalized(interval)
     var captured = PressGesture(longInterval: value)
     var passive = PhysicalRotaryClicks(longInterval: value)
@@ -602,9 +602,37 @@ for interval in [0.4, 0.55, 0.65, 1.0, 1.55, 2.0] {
     check("configured hold opens before release", captured.expire(at: 10 + value) == [.long] && passive.expire(at: 10 + value, eligible: true) == [.long])
     check("configured release never confirms", captured.release(at: 13).isEmpty && passive.edge(down: false, at: 13, eligible: true).isEmpty)
 }
-check("hold minimum stays beyond double arbitration", RotaryHoldTiming.range.lowerBound > PressGesture().doubleInterval)
+check("short hold retains double gap", RotaryHoldTiming.range.lowerBound == 0.2 && PressGesture(longInterval: 0.2).doubleInterval == 0.280)
+// A short hold threshold is independent of the release-based double-click gap.
+for interval in [0.2, 0.25] {
+    var captured = PressGesture(longInterval: interval)
+    var passive = PhysicalRotaryClicks(longInterval: interval)
+    _ = captured.press(at: 0); _ = passive.edge(down: true, at: 0, eligible: true)
+    check("fast short release defers single", captured.release(at: 0.05).isEmpty && passive.edge(down: false, at: 0.05, eligible: true).isEmpty)
+    check("single waits full double gap", captured.expire(at: 0.329).isEmpty && passive.expire(at: 0.329, eligible: true).isEmpty)
+    check("single after double gap", captured.expire(at: 0.331) == [.single] && passive.expire(at: 0.331, eligible: true) == [.single])
+    // Second press can start after the long threshold elapsed since first release.
+    _ = captured.press(at: 1); _ = passive.edge(down: true, at: 1, eligible: true)
+    _ = captured.release(at: 1.04); _ = passive.edge(down: false, at: 1.04, eligible: true)
+    check("second press within 280ms gap", captured.press(at: 1.31).isEmpty && passive.edge(down: true, at: 1.31, eligible: true).isEmpty)
+    check("fast double preserved at short hold threshold", captured.release(at: 1.35) == [.double] && passive.edge(down: false, at: 1.35, eligible: true) == [.double])
+    check("double suppresses pending single", captured.expire(at: 2).isEmpty && passive.expire(at: 2, eligible: true).isEmpty)
+    _ = captured.press(at: 3); _ = passive.edge(down: true, at: 3, eligible: true)
+    _ = captured.release(at: 3.04); _ = passive.edge(down: false, at: 3.04, eligible: true)
+    _ = captured.press(at: 3.1); _ = passive.edge(down: true, at: 3.1, eligible: true)
+    check("second held press cancels first click", captured.expire(at: 3.1 + interval) == [.long] && passive.expire(at: 3.1 + interval, eligible: true) == [.long])
+    check("held repeat never refires", captured.press(at: 4).isEmpty && passive.edge(down: true, at: 4, eligible: true).isEmpty && captured.expire(at: 4).isEmpty && passive.expire(at: 4, eligible: true).isEmpty)
+    check("second held release never confirms", captured.release(at: 4.1).isEmpty && passive.edge(down: false, at: 4.1, eligible: true).isEmpty)
+    check("long suppresses both short clicks", captured.expire(at: 5).isEmpty && passive.expire(at: 5, eligible: true).isEmpty)
+    _ = captured.press(at: 6); _ = passive.edge(down: true, at: 6, eligible: true)
+    check("release immediately before threshold is short", captured.release(at: 6 + interval - 0.001).isEmpty && passive.edge(down: false, at: 6 + interval - 0.001, eligible: true).isEmpty)
+    check("short boundary emits single", captured.expire(at: 7) == [.single] && passive.expire(at: 7, eligible: true) == [.single])
+    _ = captured.press(at: 8); _ = passive.edge(down: true, at: 8, eligible: true)
+    check("exact threshold delayed timer release is long", captured.release(at: 8 + interval) == [.long] && passive.edge(down: false, at: 8 + interval, eligible: true) == [.long])
+    check("threshold release has no trailing action", captured.expire(at: 9).isEmpty && passive.expire(at: 9, eligible: true).isEmpty)
+}
 check("invalid hold is default", RotaryHoldTiming.normalized(.nan) == 1 && RotaryHoldTiming.normalized(.infinity) == 1)
-check("hold bounds clamp", RotaryHoldTiming.normalized(-1) == 0.4 && RotaryHoldTiming.normalized(99) == 2)
+check("hold bounds clamp", RotaryHoldTiming.normalized(-1) == 0.2 && RotaryHoldTiming.normalized(99) == 2)
 check("hold steps are rounded", abs(RotaryHoldTiming.normalized(0.62) - 0.6) < 0.0001)
 do {
     var g = PhysicalRotaryClicks(longInterval: 1)

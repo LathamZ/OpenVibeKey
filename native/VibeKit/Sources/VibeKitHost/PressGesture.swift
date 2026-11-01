@@ -15,7 +15,9 @@ public struct PressGesture {
         return clickDeadline
     }
     public init(doubleInterval: TimeInterval = 0.280, longInterval: TimeInterval = 0.650) {
-        precondition(doubleInterval > 0 && longInterval > doubleInterval)
+        // The double window measures the gap after release; the long threshold measures
+        // each held press. Either may be shorter without changing click arbitration.
+        precondition(doubleInterval.isFinite && doubleInterval > 0 && longInterval.isFinite && longInterval > 0)
         self.doubleInterval = doubleInterval; self.longInterval = longInterval
     }
     /// Keep the release barrier across context changes, so an already-held key cannot retrigger.

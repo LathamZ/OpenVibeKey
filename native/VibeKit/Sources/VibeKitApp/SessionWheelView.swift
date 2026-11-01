@@ -174,7 +174,7 @@ struct WheelSensitivitySettings: View {
                     .accessibilityValue(String(format: "%.2f 秒", controller.rotaryHoldInterval))
                 Text(String(format: "%.2f 秒", controller.rotaryHoldInterval)).font(.caption.monospacedDigit()).frame(width: 56)
             }
-            Text("0.40–2.00 秒；达到设定时间即呼出，松开不会确认。自动保存，下次按住生效。")
+            Text("0.20–2.00 秒；达到设定时间即呼出，松开不会确认。自动保存，下次按住生效。")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text("灵敏度").font(.callout)
@@ -257,9 +257,9 @@ func runWheelPersistenceCheck(outputPath: String) -> Int32 {
     checks["tint_can_be_fully_transparent"] = fifth.wheelTintOpacity == 0
     fifth.setWheelTintOpacity(2)
     checks["tint_opacity_clamped"] = fifth.wheelTintOpacity == 1
-    fifth.setRotaryHoldInterval(0.55)
+    fifth.setRotaryHoldInterval(0.2)
     let sixth = CodexWorkflowController(defaults: defaults)
-    checks["hold_timing_survives_recreation"] = abs(sixth.rotaryHoldInterval - 0.55) < 0.0001
+    checks["hold_timing_survives_recreation"] = abs(sixth.rotaryHoldInterval - 0.2) < 0.0001
     var observed: Double?
     sixth.rotaryHoldChanged = { observed = $0 }
     sixth.setRotaryHoldInterval(0.7)

@@ -2,9 +2,9 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 47)
+## 1.0.0-preview.5 (build 48)
 
-- Device Settings owns the rotary hold duration (0.40–2.00s, 0.05s increments; default 1.00s), selection sensitivity, glass strength and tint transparency. Duration changes persist and apply to the next press in both captured and pass-through paths.
+- Device Settings owns the rotary hold duration (0.20–2.00s, 0.05s increments; default 1.00s), selection sensitivity, glass strength and tint transparency. Duration changes persist and apply to the next press in both captured and pass-through paths.
 - Holding to the chosen duration opens the selector before release. Continued hold/repeat and the final release never confirm a conversation; timing changes during a press cancel that gesture until release.
 - Selector glass uses a neutral light material independent of white text or the app's dark theme. No forced dark backdrop is added; the visible desktop still contributes to real behind-window blur.
 
@@ -71,7 +71,7 @@ A distribution may additionally include a public certificate directory using --p
 
 ## Controls in this release
 
-Double rotary click: preselect target App silently. Hold rotary to the configured duration (Device Settings, 0.40–2.00s, default 1.00s): immediately open the preselected target’s selector without activating it. Rotate: move along the orbit. Short rotary press: open selected conversation. Buttons 1 (microphone) / 2 (check): previous/next page. Button 3 (cross): cancel without opening the highlight. In the selected Codex, DeepSeek Harness or Claude.app Code session, short rotary switches editing/browsing; physical rotary emits Left/Right or PageUp/PageDown. Button 3 retains Backspace and hardware repeat. Other applications retain default Left/Right rotation. Configure Codex's own focusMainChat shortcut to Control+Option+Command+F12.
+Double rotary click: preselect target App silently. Hold rotary to the configured duration (Device Settings, 0.20–2.00s, default 1.00s): immediately open the preselected target’s selector without activating it. Rotate: move along the orbit. Short rotary press: open selected conversation. Buttons 1 (microphone) / 2 (check): previous/next page. Button 3 (cross): cancel without opening the highlight. In the selected Codex, DeepSeek Harness or Claude.app Code session, short rotary switches editing/browsing; physical rotary emits Left/Right or PageUp/PageDown. Button 3 retains Backspace and hardware repeat. Other applications retain default Left/Right rotation. Configure Codex's own focusMainChat shortcut to Control+Option+Command+F12.
 
 ## Verification boundary
 
