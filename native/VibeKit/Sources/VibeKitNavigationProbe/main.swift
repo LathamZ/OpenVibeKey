@@ -723,5 +723,37 @@ for (id,hex) in [(WorkflowTargetID.codex,"FFFFFF"),(.claudeCode,"D97757"),(.deep
 }
 check("green WeChat remains activation only",!WorkflowCatalog.supports(.conversations,in:.weChat))
 
+// Hold-to-talk consumes only copied AU05 button edges; it never emits shortcuts.
+do {
+    check("voice right Command maps to physical modifier usage", VoiceKeySignal.usages(["RCmd"]) == Set([UInt32(0xe7)]))
+    check("voice supports a four-part chord", VoiceKeySignal.usages(["LCtrl", "ROpt", "RCmd", "F12"]) == Set<UInt32>([0xe0, 0xe6, 0xe7, 0x45]))
+    check("voice rejects empty and unsupported bindings", VoiceKeySignal.usages([]) == nil && VoiceKeySignal.usages(["Unknown"]) == nil)
+    check("voice rejects duplicate and oversized bindings", VoiceKeySignal.usages(["RCmd", "RCmd"]) == nil && VoiceKeySignal.usages(["LCtrl", "LShift", "LOpt", "LCmd", "F12"]) == nil)
+    var press = VoiceHoldPress()
+    check("voice starts closed", !press.isOpen && press.edge(down: false, eligible: true) == nil)
+    for _ in 0..<25 {
+        check("voice opens on fresh physical down", press.edge(down: true, eligible: true) == true && press.isOpen)
+        check("voice repeat does not toggle", press.edge(down: true, eligible: true) == nil && press.isOpen)
+        check("voice release closes immediately", press.edge(down: false, eligible: true) == false && !press.isOpen)
+        check("voice repeated release remains closed", press.edge(down: false, eligible: true) == nil)
+    }
+    for _ in 0..<5 {
+        _ = press.edge(down: true, eligible: true)
+        check("context or input change closes held voice", press.cancel() == false && !press.isOpen)
+        check("context recovery cannot reopen a held button", press.edge(down: true, eligible: true) == nil && !press.isOpen)
+        check("cancelled release stays silent", press.edge(down: false, eligible: true) == nil)
+    }
+    var initial = VoiceHoldPress(initiallyHeld: true)
+    check("startup held voice never opens", initial.edge(down: true, eligible: true) == nil && !initial.isOpen)
+    _ = initial.edge(down: false, eligible: true)
+    check("startup barrier releases for next press", initial.edge(down: true, eligible: true) == true)
+    _ = initial.edge(down: false, eligible: true)
+    check("selector page key cannot open mic", initial.edge(down: true, eligible: false) == nil && !initial.isOpen)
+    check("leaving selector while held stays closed", initial.edge(down: true, eligible: true) == nil && !initial.isOpen)
+    _ = initial.edge(down: false, eligible: true)
+    _ = initial.edge(down: true, eligible: true)
+    check("eligibility loss while held closes mic", initial.edge(down: true, eligible: false) == false && !initial.isOpen)
+}
+
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
 exit(failures == 0 ? 0 : 1)

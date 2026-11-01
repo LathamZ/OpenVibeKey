@@ -252,28 +252,39 @@ public final class MicMeter: ObservableObject {
     @Published public var running = false
     @Published public var permissionDenied = false
     @Published public var needsBundle = false   // swift run 无 Info.plist 麦克风用途，无法请求权限
-    private let engine = AVAudioEngine()
+    private var engine: AVAudioEngine?
+    private var requestGeneration = UUID()
+    private var starting = false
+    public var captureAllocated: Bool { engine != nil }
 
     public init() {}
 
     public func start() {
+        guard !running, !starting else { return }
+        starting = true; permissionDenied = false; needsBundle = false
+        let generation = UUID(); requestGeneration = generation
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         // 无 NSMicrophoneUsageDescription 时请求权限会崩溃；仅在已授权、或有用途说明可安全请求时才继续。
         let hasUsage = Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") != nil
         if status == .authorized { beginTap(); return }
-        guard hasUsage else { needsBundle = true; return }
+        guard hasUsage else { needsBundle = true; starting = false; return }
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             DispatchQueue.main.async {
-                if !granted { self.permissionDenied = true; return }
+                guard self.requestGeneration == generation, self.starting else { return }
+                if !granted { self.permissionDenied = true; self.starting = false; return }
                 self.beginTap()
             }
         }
     }
 
     private func beginTap() {
+        guard starting, engine == nil else { return }
+        let engine = AVAudioEngine()
+        self.engine = engine
         let input = engine.inputNode
         let fmt = input.inputFormat(forBus: 0)
-        guard fmt.channelCount > 0 else { return }
+        guard fmt.channelCount > 0 else { stop(); return }
+        let captureGeneration = requestGeneration
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buf, _ in
             guard let ch = buf.floatChannelData?[0] else { return }
             let n = Int(buf.frameLength)
@@ -281,14 +292,20 @@ public final class MicMeter: ObservableObject {
             for i in 0..<n { sum += ch[i] * ch[i] }
             let rms = n > 0 ? sqrt(sum / Float(n)) : 0
             let level = min(1, rms * 6)  // 经验缩放
-            DispatchQueue.main.async { self?.level = level }
+            DispatchQueue.main.async {
+                guard let self, self.running, self.requestGeneration == captureGeneration else { return }
+                self.level = level
+            }
         }
-        do { try engine.start(); running = true } catch { running = false }
+        do { try engine.start(); running = true; starting = false } catch { stop() }
     }
 
     public func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        running = false; level = 0
+        requestGeneration = UUID(); starting = false
+        // Never touch inputNode when idle: doing so can allocate an input device.
+        if let engine {
+            engine.stop(); engine.inputNode.removeTap(onBus: 0); engine.reset()
+        }
+        engine = nil; running = false; level = 0
     }
 }

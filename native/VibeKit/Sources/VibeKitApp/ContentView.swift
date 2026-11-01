@@ -35,6 +35,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 WheelSensitivitySettings(controller: vm.codexWorkflow)
+                voiceHoldCard
                 sentinelNoticeBanner
                 if !vm.connected { offlineAppBindingsCard }
                 if vm.connected {
@@ -584,6 +585,23 @@ struct ContentView: View {
     }
 
     // 麦克风调试：开关 / 降噪 / 系统输入音量(增益)。放在「灯效 · 全局」下面。
+    // Available even without the receiver, so input gating can always be disabled.
+    var voiceHoldCard: some View {
+        Card(title: "语音输入", systemImage: "mic", subtitle: "按住说话") {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("按住按钮 1 说话", isOn: Binding(
+                    get: { vm.holdToTalkEnabled }, set: { vm.setHoldToTalkEnabled($0) }))
+                    .toggleStyle(.switch)
+                if vm.holdToTalkEnabled {
+                    Label(vm.voiceHoldStatus, systemImage: vm.voiceHoldOpen ? "mic.fill" : "mic.slash.fill")
+                        .font(.caption).foregroundStyle(vm.voiceHoldReady ? Color.secondary : Color.orange)
+                    Text("控制系统当前录音设备的静音；松开立即关麦。会话选择器中按钮 1 仍是上一页。退出软件保持静音，关闭此模式恢复启用前状态。语音软件沿用原快捷键；若需随松开结束听写，请在语音软件中启用按住说话。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     var micTuneCard: some View {
         Card(title: L("麦克风"), systemImage: "waveform", subtitle: L("开关 / 降噪 / 收音大小")) {
             VStack(alignment: .leading, spacing: 14) {

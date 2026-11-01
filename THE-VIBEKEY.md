@@ -2,7 +2,11 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 49)
+## 1.0.0-preview.5 (build 50)
+
+- Button 1 now offers hold-to-talk, enabled by default in Device Settings. It controls the current default input device's writable CoreAudio mute property: press opens input, release mutes it. It never records audio or changes gain, and retains the physical voice shortcut. In the selector, button 1 remains previous-page only.
+- Initial held keys, context transitions, input-device changes, disconnect and sleep require a fresh release before reopening. Normal quit leaves the controlled inputs muted; explicitly disabling the mode restores saved pre-mode mute states. Devices without a writable master input mute are reported unsupported; there is no silent volume fallback. Other apps may still hold an audio stream open and show an OS microphone indicator while input is muted. A crash while physically held cannot guarantee immediate re-muting; this is software input gating, not a hardware privacy switch.
+- The input-level meter creates its capture engine only for an explicit test and releases it on stop; idle settings no longer touch inputNode.
 
 - Repeated long holds while the selector is already open preserve its highlight, page, snapshot and gesture/capture ownership; an outstanding confirmed open also keeps its request ID.
 - The central 650×300 ellipse now fades continuously from its center to its edge with a smooth falloff, replacing the solid inner 85% and short outer fade. Existing glass/tint preferences are retained.

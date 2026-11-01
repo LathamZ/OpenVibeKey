@@ -258,6 +258,41 @@ final class VibeVM: ObservableObject {
     private var navigationRotationHeld = Set<String>()
     private var navigationTimer: Timer?
     private let physicalRotaryMonitor = PhysicalRotaryMonitor()
+    private let holdToTalk = HoldToTalkController()
+    @Published private(set) var holdToTalkEnabled = UserDefaults.standard.object(forKey: HoldToTalkController.preferenceKey) as? Bool ?? true
+    @Published private(set) var voiceHoldStatus = "正在准备按住说话…"
+    @Published private(set) var voiceHoldReady = false
+    @Published private(set) var voiceHoldOpen = false
+    func setHoldToTalkEnabled(_ enabled: Bool) {
+        holdToTalkEnabled = enabled
+        defaults.set(enabled, forKey: HoldToTalkController.preferenceKey)
+        holdToTalk.configure(enabled)
+    }
+    private func configureHoldToTalk() {
+        holdToTalk.configuration = { [weak self] in
+            guard let self, self.connected, self.slotsHydrated, !self.applyingProfile,
+                  !self.quitting, self.appBindings["btn1"] == nil,
+                  let tokens = self.buttons.first?.tokens, let signal = VoiceKeySignal.usages(tokens) else { return nil }
+            // A keyboard report cannot identify two physical controls with the same signal.
+            for state in Array(self.buttons.dropFirst()) + self.dial {
+                if let other = VoiceKeySignal.usages(state.tokens), signal.isSubset(of: other) { return nil }
+            }
+            return tokens
+        }
+        holdToTalk.eligible = { [weak self] in
+            guard let self else { return false }
+            return self.connected && self.slotsHydrated && !self.applyingProfile && !self.quitting &&
+                !self.codexWorkflow.busy && !self.codexWorkflow.pageRoutingBusy &&
+                self.codexWorkflow.navigation.stage != .choosing && self.codexWorkflow.navigation.stage != .opening
+        }
+        holdToTalk.onStatus = { [weak self] text, ready, open in
+            guard let self else { return }
+            if self.voiceHoldStatus != text { self.voiceHoldStatus = text }
+            if self.voiceHoldReady != ready { self.voiceHoldReady = ready }
+            if self.voiceHoldOpen != open { self.voiceHoldOpen = open }
+        }
+        holdToTalk.configure(holdToTalkEnabled)
+    }
     private var nativePageRoute = NativePageRouteState()
     private let navigationRecoveryKey = "codexNavigation.recovery.v1"
     private var wheelPagePress = WheelPagePress()
@@ -512,6 +547,7 @@ final class VibeVM: ObservableObject {
 
     // 在线→离线：AU05 关机但连接器仍在，清掉过期信息、退回等待态。
     private func goOffline() {
+        holdToTalk.cancel()
         navigationStartupStateVerified = false
         defaults.removeObject(forKey: NavigationStartupGate.successPIDKey)
         if navigationStartupEnabled {
@@ -765,6 +801,7 @@ final class VibeVM: ObservableObject {
             navigationOwnsHardware = true; codexWorkflow.ready = true; codexWorkflow.message = "设备已就绪，原键位已保存。"
             return
         }
+        configureHoldToTalk()
         defaults.removeObject(forKey: NavigationStartupGate.successPIDKey)
         if dialRestore != nil {
             navigationStartupRecoverySeen = true
@@ -810,6 +847,7 @@ final class VibeVM: ObservableObject {
         AppLifecycle.terminationCancelled = { [weak self] in
             guard let self else { return }
             self.quitting = false
+            self.holdToTalk.configure(self.holdToTalkEnabled)
             PermissionCenter.shared.restartCancelled()
             self.dialGestureBusy = false
             self.syncDialGesture()
@@ -817,11 +855,12 @@ final class VibeVM: ObservableObject {
         AppLifecycle.prepareQuit = { [weak self] completion in
             guard let self else { completion(true); return }
             self.quitting = true
+            self.holdToTalk.shutdown()
             self.codexWorkflow.stop()
             self.restoreCodexNavigation { [weak self] ok in
                 guard let self else { completion(false); return }
                 if ok { self.prepareDialQuit(completion: completion) }
-                else { self.quitting = false; completion(false) }
+                else { self.quitting = false; self.holdToTalk.configure(self.holdToTalkEnabled); completion(false) }
             }
         }
         // 名字回落匹配命中时，enforcer 会把解析出的真实 uid 回调回来——存下来，下次启动就能走
@@ -1844,6 +1883,7 @@ extension VibeVM {
         physicalRotaryMonitor.setLongInterval(value)
     }
     private func cancelNavigationGestures() {
+        holdToTalk.cancel()
         navigationTimer?.invalidate(); navigationTimer = nil
         navigationDial.cancel(); navigationExit.cancel()
         selectorExitPress.cancel(); wheelPagePress.cancel()

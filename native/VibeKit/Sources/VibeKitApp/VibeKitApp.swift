@@ -17,6 +17,16 @@ struct VibeKitApp: App {
     @ObservedObject private var language = AppLanguage.shared
 
     init() {
+        if let i = CommandLine.arguments.firstIndex(of: "--voice-audio-lifecycle-check"), i + 1 < CommandLine.arguments.count {
+            let meter = MicMeter()
+            let before = !meter.captureAllocated && !meter.running
+            meter.stop(); meter.stop()
+            let result: [String: Any] = ["idle_has_no_capture_engine": before,
+                "repeated_stop_does_not_allocate_engine": !meter.captureAllocated && !meter.running,
+                "audio_recorded": false, "hardware_started": false]
+            let data = try! JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+            try! data.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1])); exit(before && !meter.captureAllocated ? 0 : 1)
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--selector-response-check"), i + 1 < CommandLine.arguments.count {
             exit(CodexWorkflowController.runResponseCheck(path: CommandLine.arguments[i + 1]))
         }
