@@ -563,7 +563,7 @@ do {
     var g = PhysicalRotaryClicks()
     _ = g.edge(down:true,at:0,eligible:true); _ = g.edge(down:false,at:0.1,eligible:true)
     check("second down still waits",g.edge(down:true,at:0.25,eligible:true).isEmpty)
-    check("no single timer during held second",g.deadline == nil && g.expire(at:0.39,eligible:true).isEmpty)
+    check("no single timer during held second",g.deadline == 1.25 && g.expire(at:0.39,eligible:true).isEmpty)
     check("passive double only on second release",g.edge(down:false,at:0.4,eligible:true) == [.double])
     check("double suppresses both singles",g.expire(at:2,eligible:true).isEmpty)
 }
@@ -572,8 +572,13 @@ for second in [false,true] {
     if second { _ = g.edge(down:true,at:0,eligible:true); _ = g.edge(down:false,at:0.1,eligible:true) }
     _ = g.edge(down:true,at:0.25,eligible:true)
     check("repeat down not another click",g.edge(down:true,at:0.3,eligible:true).isEmpty)
-    check("passive hold never fires before release",g.expire(at:2,eligible:true).isEmpty)
-    check("passive long is release committed",g.edge(down:false,at:2.5,eligible:true) == [.long])
+    check("passive hold has exact one-second deadline",g.deadline == 1.25)
+    check("passive hold not before one second",g.expire(at:1.249,eligible:true).isEmpty)
+    check("passive long fires while still held",g.expire(at:1.25,eligible:true) == [.long])
+    check("passive long deadline consumed",g.deadline == nil)
+    check("held timer cannot repeat",g.expire(at:2,eligible:true).isEmpty)
+    check("held repeats cannot reopen",g.edge(down:true,at:2.1,eligible:true).isEmpty)
+    check("release after panel opens never confirms",g.edge(down:false,at:2.5,eligible:true).isEmpty)
     check("long has no trailing single or double",g.expire(at:3,eligible:true).isEmpty)
 }
 do {
@@ -586,6 +591,70 @@ do {
     check("ineligible down cannot become eligible hold",g.edge(down:false,at:8,eligible:true).isEmpty)
     _ = g.edge(down:true,at:9,eligible:true); _ = g.edge(down:false,at:9.1,eligible:true)
     check("foreground change cancels pending single",g.expire(at:10,eligible:false).isEmpty && g.expire(at:11,eligible:true).isEmpty)
+}
+for interval in [0.4, 0.55, 0.65, 1.0, 1.55, 2.0] {
+    let value = RotaryHoldTiming.normalized(interval)
+    var captured = PressGesture(longInterval: value)
+    var passive = PhysicalRotaryClicks(longInterval: value)
+    _ = captured.press(at: 10); _ = passive.edge(down: true, at: 10, eligible: true)
+    check("configured paths share deadline", captured.deadline == passive.deadline)
+    check("configured hold is not early", captured.expire(at: 10 + value - 0.001).isEmpty && passive.expire(at: 10 + value - 0.001, eligible: true).isEmpty)
+    check("configured hold opens before release", captured.expire(at: 10 + value) == [.long] && passive.expire(at: 10 + value, eligible: true) == [.long])
+    check("configured release never confirms", captured.release(at: 13).isEmpty && passive.edge(down: false, at: 13, eligible: true).isEmpty)
+}
+check("hold minimum stays beyond double arbitration", RotaryHoldTiming.range.lowerBound > PressGesture().doubleInterval)
+check("invalid hold is default", RotaryHoldTiming.normalized(.nan) == 1 && RotaryHoldTiming.normalized(.infinity) == 1)
+check("hold bounds clamp", RotaryHoldTiming.normalized(-1) == 0.4 && RotaryHoldTiming.normalized(99) == 2)
+check("hold steps are rounded", abs(RotaryHoldTiming.normalized(0.62) - 0.6) < 0.0001)
+do {
+    var g = PhysicalRotaryClicks(longInterval: 1)
+    _ = g.edge(down: true, at: 0, eligible: true); g.setLongInterval(0.4)
+    check("setting change while held cancels deadline", g.deadline == nil && g.expire(at: 1, eligible: true).isEmpty)
+    check("setting change held repeats ignored", g.edge(down: true, at: 1.1, eligible: true).isEmpty)
+    check("setting change held release silent", g.edge(down: false, at: 1.2, eligible: true).isEmpty)
+    _ = g.edge(down: true, at: 2, eligible: true)
+    check("next press adopts new timing", g.expire(at: 2.4, eligible: true) == [.long])
+}
+// Carbon may observe a repeat after the passive long action opens the panel.
+do {
+    var captured = PressGesture(longInterval: PhysicalRotaryClicks.longInterval)
+    _ = captured.press(at: 1); captured.cancel()
+    check("passive handoff marks captured key held", captured.isHeld && captured.deadline == nil)
+    check("handoff repeat cannot start new press", captured.press(at: 1.1).isEmpty)
+    check("handoff held timer cannot reopen panel", captured.expire(at: 2.1).isEmpty)
+    check("handoff physical release never confirms", captured.release(at: 2.2).isEmpty)
+    check("handoff release leaves no pending single", captured.expire(at: 3).isEmpty)
+}
+// Captured and passive paths share a one-second threshold and a release barrier.
+for cancelAt in [0.4, 1.1] {
+    var captured = PressGesture(longInterval: PhysicalRotaryClicks.longInterval)
+    var passive = PhysicalRotaryClicks()
+    _ = captured.press(at: 0); _ = passive.edge(down: true, at: 0, eligible: true)
+    if cancelAt > 1 {
+        check("captured opens at one second while held", captured.expire(at: 1) == [.long])
+        check("passive opens at one second while held", passive.expire(at: 1, eligible: true) == [.long])
+    }
+    captured.cancel(); passive.cancel()
+    check("context cancellation clears both deadlines", captured.deadline == nil && passive.deadline == nil)
+    check("cancelled held timer never opens", captured.expire(at: 2).isEmpty && passive.expire(at: 2, eligible: true).isEmpty)
+    check("release after capture handoff cannot confirm", captured.release(at: 3).isEmpty && passive.edge(down: false, at: 3, eligible: true).isEmpty)
+    _ = captured.press(at: 4); _ = passive.edge(down: true, at: 4, eligible: true)
+    _ = captured.release(at: 4.1); _ = passive.edge(down: false, at: 4.1, eligible: true)
+    check("fresh short click works after long release", captured.expire(at: 4.4) == [.single] && passive.expire(at: 4.4, eligible: true) == [.single])
+}
+do {
+    var captured = PressGesture(longInterval: PhysicalRotaryClicks.longInterval)
+    var passive = PhysicalRotaryClicks()
+    _ = captured.press(at: 10); _ = passive.edge(down: true, at: 10, eligible: true)
+    check("captured and passive deadline match one second", captured.deadline == 11 && passive.deadline == 11)
+    check("both paths stay quiet before deadline", captured.expire(at: 10.999).isEmpty && passive.expire(at: 10.999, eligible: true).isEmpty)
+    check("timer-delayed release fallback remains one long", captured.release(at: 11.1) == [.long] && passive.edge(down: false, at: 11.1, eligible: true) == [.long])
+    check("fallback has no trailing action", captured.expire(at: 12).isEmpty && passive.expire(at: 12, eligible: true).isEmpty)
+    var initial = PhysicalRotaryClicks(initiallyHeld: true)
+    check("initial held timer is unavailable", initial.deadline == nil && initial.expire(at: 20, eligible: true).isEmpty)
+    var lost = PhysicalRotaryClicks(); _ = lost.edge(down: true, at: 0, eligible: true)
+    check("eligibility loss cancels held deadline", lost.expire(at: 1, eligible: false).isEmpty)
+    check("eligibility recovery cannot revive held action", lost.expire(at: 2, eligible: true).isEmpty && lost.edge(down: false, at: 3, eligible: true).isEmpty)
 }
 for bits in 0..<16 {
     let available = Set(WorkflowAppCycle.order.enumerated().filter { bits & (1 << $0.offset) != 0 }.map(\.element))

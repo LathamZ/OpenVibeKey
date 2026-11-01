@@ -122,7 +122,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                         Label("旋钮", systemImage: "arrow.left.arrow.right").font(.headline)
                         actionRow("默认转动", "← ／ →")
                         actionRow("会话内短按", "编辑 ⇄ 浏览")
-                        actionRow("长按后松开", "选择会话")
+                        actionRow(String(format: "按住 %.2f 秒", controller.rotaryHoldInterval), "选择会话")
                         Divider()
                         Label(WorkflowCatalog.target(controller.activeTarget).name + " · " + controller.rotaryModeLabel, systemImage: controller.rotaryEditing ? "text.cursor" : "doc.text")
                             .font(.callout).foregroundStyle(Color.accentColor)
@@ -203,7 +203,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
             workspaceCard {
                 Text("选择会话").font(.headline)
                 actionRow("双击旋钮", "仅选择目标 App；菜单栏变色，确认会话后再打开 App")
-                actionRow("长按旋钮并松开", "呼出流动轨道")
+                actionRow("按住到设定时长", "呼出流动轨道")
                 actionRow("旋转", "移动轨道 · 停下吸附")
                 actionRow("短按旋钮", "打开选中会话")
                 hardwareRow("btn1", "上一页")

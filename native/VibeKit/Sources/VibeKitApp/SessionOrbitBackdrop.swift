@@ -7,12 +7,13 @@ import VibeKitHost
 struct SessionOrbitBackdrop: NSViewRepresentable {
     var strength: Double
     var card = false
-    @Environment(\.colorScheme) private var colorScheme
     func makeNSView(context: Context) -> OrbitMaterialView {
         OrbitMaterialView(card: card)
     }
     func updateNSView(_ view: OrbitMaterialView, context: Context) {
-        let appearance: NSAppearance.Name = colorScheme == .dark ? .darkAqua : .aqua
+        // White selector text does not require a dark backdrop. Keep neutral light glass
+        // independently of the desktop/app theme instead of adding a dark material wash.
+        let appearance: NSAppearance.Name = .aqua
         if view.effect.appearance?.name != appearance { view.effect.appearance = NSAppearance(named: appearance) }
         let alpha = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : SessionOrbit.glass(strength)
         if abs(view.alphaValue - alpha) > 0.0001 { view.alphaValue = alpha }

@@ -94,6 +94,15 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     func project(_ id: String) -> String { activeTarget == .codex ? projectNames[id] ?? "固定会话" : WorkflowCatalog.target(activeTarget).name }
     @Published private(set) var wheelPosition = 0.0
     @Published private(set) var wheelSnapping = false
+    @Published private(set) var rotaryHoldInterval = RotaryHoldTiming.defaultInterval
+    var rotaryHoldChanged: ((Double) -> Void)?
+    func setRotaryHoldInterval(_ raw: Double) {
+        let value = RotaryHoldTiming.normalized(raw)
+        guard value != rotaryHoldInterval else { return }
+        rotaryHoldInterval = value
+        if !preview { defaults.set(value, forKey: RotaryHoldTiming.preferenceKey) }
+        rotaryHoldChanged?(value)
+    }
     @Published private(set) var wheelStepsPerItem = 3.0
     @Published private(set) var wheelTintOpacity = 0.075
     func setWheelTintOpacity(_ raw: Double) {
@@ -227,6 +236,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
 
     init(defaults: UserDefaults = .standard, preview: Bool = false) {
         self.defaults = defaults; self.preview = preview
+        if !preview, let saved = defaults.object(forKey: RotaryHoldTiming.preferenceKey) as? Double {
+            rotaryHoldInterval = RotaryHoldTiming.normalized(saved)
+        }
         currentSessionIDs = defaults.dictionary(forKey: "workflow.currentSession.v1") as? [String: String] ?? [:]
         if !preview, let raw = defaults.string(forKey: "workflow.activeTarget.v1"), let target = WorkflowTargetID(rawValue: raw) { activeTarget = target }
         if let data = defaults.data(forKey: sessionKey) {
@@ -553,7 +565,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                     self.rotaryEditing = false
                     self.refreshPhysicalFocusRoute()
                     self.message = self.nativeFocusConfigured
-                        ? "已请求打开“\(session.title)”。再单击旋钮聚焦后，可用第三键退格；长按旋钮并松开返回列表（需输入监控）。"
+                        ? "已请求打开“\(session.title)”。再单击旋钮聚焦后，可用第三键退格；按住旋钮到设定时长返回列表（需输入监控）。"
                         : "已请求打开“\(session.title)”。原生聚焦未启用，请先在设置中完成手动绑定。"
                     // A successful open returns directly to the target; no intermediary notice.
                 } else { self.message = "打开请求失败，请重新选择。"; self.present() }
@@ -652,7 +664,6 @@ struct CodexNavigationSettings: View {
                 Text(controller.rotaryModeLabel).font(.caption).foregroundStyle(.secondary)
                 if controller.busy || controller.pageRoutingBusy { ProgressView().controlSize(.small) }
             }
-            WheelSensitivitySettings(controller: controller)
             Text(controller.message).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
             Divider()
             HStack {
@@ -807,7 +818,7 @@ private struct NativeBackspaceHelpView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("内容层：短按 ⌫ 删除，按住连续退格，松开停止；连发延迟和速度由 macOS 决定。列表层：底部键按下并松开关闭列表。")
                 Text("先单击旋钮聚焦输入框。退格直接作用于系统当前焦点（包括其他窗口），不会自动查找输入框；有选区时按编辑器原生规则删除。")
-                Text("内容层双击是两次退格，不会停止生成。进入列表请长按旋钮并松开，或使用菜单栏“选择会话”。关闭导航／正常退出会恢复原键位。")
+                Text("内容层双击是两次退格，不会停止生成。进入列表请按住旋钮到设定时长，或使用菜单栏“选择会话”。关闭导航／正常退出会恢复原键位。")
             }.font(.caption).foregroundStyle(.secondary).padding(6)
         }
     }
@@ -820,7 +831,7 @@ private struct NativePagesSetupView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Codex 当前模式：" + controller.rotaryModeLabel).fontWeight(.semibold)
                 Text(controller.nativePageStatus)
-                Text("启用导航期间，其他 App 旋钮始终为 ←／→。Codex 打开会话后默认浏览；单击进入编辑并聚焦输入框，再单击切回浏览。长按至少 0.65 秒并松开只返回列表，不切换编辑模式；列表仍转动选择会话。")
+                Text("启用导航期间，其他 App 旋钮始终为 ←／→。Codex 打开会话后默认浏览；单击进入编辑并聚焦输入框，再单击切回浏览。按住旋钮到设定时长直接返回列表，松开不会确认会话，也不切换编辑模式；列表仍转动选择会话。")
                 Text("单击沿用真实硬件聚焦快捷键；每次短按释放切换模式，不模拟输入。切回浏览不会自动聚焦正文；PageUp／PageDown 跟随当前焦点，若未翻页请手动点击正文。切换 App 不清除 Codex 模式，回到 Codex 后恢复。关闭导航仍恢复原键位。")
                 Text("双击提交恢复任务尚未接入；提交键保持原有行为。")
             }.font(.caption).foregroundStyle(.secondary).padding(6)

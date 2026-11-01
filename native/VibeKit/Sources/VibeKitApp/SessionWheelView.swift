@@ -41,7 +41,7 @@ struct SessionWheelView: View {
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }.frame(width: controller.wheelPanelSize.width, height: controller.wheelPanelSize.height)
-            .background(Color.clear).preferredColorScheme(.dark)
+            .background(Color.clear)
     }
     private var centerInformation: some View {
         VStack(spacing: 11) {
@@ -162,10 +162,20 @@ struct WheelSensitivitySettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("流动轨道", systemImage: "dial.medium").font(.headline)
+                Label("旋钮与会话选择", systemImage: "dial.medium").font(.headline)
                 Spacer()
                 Button("预览选择器") { controller.enter(inferForeground: false) }.buttonStyle(.borderless).disabled(!controller.ready)
             }
+            HStack {
+                Text("长按触发时间").font(.callout)
+                Slider(value: Binding(get: { controller.rotaryHoldInterval }, set: { controller.setRotaryHoldInterval($0) }),
+                       in: RotaryHoldTiming.range, step: RotaryHoldTiming.step)
+                    .accessibilityLabel("旋钮长按触发时间")
+                    .accessibilityValue(String(format: "%.2f 秒", controller.rotaryHoldInterval))
+                Text(String(format: "%.2f 秒", controller.rotaryHoldInterval)).font(.caption.monospacedDigit()).frame(width: 56)
+            }
+            Text("0.40–2.00 秒；达到设定时间即呼出，松开不会确认。自动保存，下次按住生效。")
+                .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text("灵敏度").font(.callout)
                 Text("稳").font(.caption).foregroundStyle(.secondary)
@@ -247,6 +257,18 @@ func runWheelPersistenceCheck(outputPath: String) -> Int32 {
     checks["tint_can_be_fully_transparent"] = fifth.wheelTintOpacity == 0
     fifth.setWheelTintOpacity(2)
     checks["tint_opacity_clamped"] = fifth.wheelTintOpacity == 1
+    fifth.setRotaryHoldInterval(0.55)
+    let sixth = CodexWorkflowController(defaults: defaults)
+    checks["hold_timing_survives_recreation"] = abs(sixth.rotaryHoldInterval - 0.55) < 0.0001
+    var observed: Double?
+    sixth.rotaryHoldChanged = { observed = $0 }
+    sixth.setRotaryHoldInterval(0.7)
+    checks["hold_timing_reaches_runtime_callback"] = observed.map { abs($0 - 0.7) < 0.0001 } ?? false
+    sixth.setRotaryHoldInterval(.nan)
+    checks["invalid_hold_timing_is_safe"] = sixth.rotaryHoldInterval == RotaryHoldTiming.defaultInterval
+    defaults.set(-10.0, forKey: RotaryHoldTiming.preferenceKey)
+    let seventh = CodexWorkflowController(defaults: defaults)
+    checks["stored_hold_timing_is_clamped"] = seventh.rotaryHoldInterval == RotaryHoldTiming.range.lowerBound
     let passed = checks.values.allSatisfy { $0 }
     let result: [String: Any] = ["passed": passed, "checks": checks, "hardware_started": false, "target_app_control": false, "isolated_preferences": true]
     do { try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: outputPath)) }

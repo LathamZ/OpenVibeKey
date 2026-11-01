@@ -251,7 +251,7 @@ final class VibeVM: ObservableObject {
     }
     private var navigationRecoveryCorrupt = false
     private var navigationOperation = UUID()
-    private var navigationDial = PressGesture()
+    private var navigationDial = PressGesture(longInterval: PhysicalRotaryClicks.longInterval)
     private var navigationExit = PressGesture()
     private var selectorExitPress = SelectorExitPress()
     private var selectorExitGeneration: UUID?
@@ -757,6 +757,8 @@ final class VibeVM: ObservableObject {
 
     // MARK: 本地配置存档（Profile）
     init() {
+        applyRotaryHoldInterval(codexWorkflow.rotaryHoldInterval)
+        codexWorkflow.rotaryHoldChanged = { [weak self] value in self?.applyRotaryHoldInterval(value) }
         if CommandLine.arguments.contains("--workspace-preview") {
             connected = true; linkPresent = true; sn = "预览设备"; firmware = "4.6.3"; battery = "70%"; batteryPercent = 70
             buttons[0].current = "右⌘"; buttons[1].current = "⏎"
@@ -790,7 +792,14 @@ final class VibeVM: ObservableObject {
         physicalRotaryMonitor.onDoubleRelease = { [weak self] in self?.codexWorkflow.cycleApplication() }
         physicalRotaryMonitor.onShortRelease = { [weak self] in self?.codexWorkflow.toggleRotaryMode() }
         codexWorkflow.cancelPhysicalRotaryGesture = { [weak self] in self?.physicalRotaryMonitor.cancelGesture() }
-        physicalRotaryMonitor.onLongRelease = { [weak self] in self?.codexWorkflow.enter() }
+        physicalRotaryMonitor.onLongPress = { [weak self] in
+            guard let self else { return }
+            // The same physical press is still held when Carbon takes ownership.
+            // Carry its release barrier across the passive-to-captured handoff.
+            _ = self.navigationDial.press(at: ProcessInfo.processInfo.systemUptime)
+            self.navigationDial.cancel()
+            self.codexWorkflow.enter()
+        }
         physicalRotaryMonitor.onStatus = { [weak self] status in self?.codexWorkflow.physicalRotaryStatus = status }
         codexWorkflow.retryPhysicalRotaryMonitoring = { [weak self] in
             guard let self, self.codexWorkflow.ready else { return }
@@ -1824,6 +1833,16 @@ extension VibeVM {
 
 // MARK: - Opt-in Codex navigation and physical native-shortcut delivery
 extension VibeVM {
+    private func applyRotaryHoldInterval(_ value: Double) {
+        let held = navigationDial.isHeld
+        cancelNavigationGestures()
+        navigationDial = PressGesture(longInterval: RotaryHoldTiming.normalized(value))
+        if held {
+            _ = navigationDial.press(at: ProcessInfo.processInfo.systemUptime)
+            navigationDial.cancel()
+        }
+        physicalRotaryMonitor.setLongInterval(value)
+    }
     private func cancelNavigationGestures() {
         navigationTimer?.invalidate(); navigationTimer = nil
         navigationDial.cancel(); navigationExit.cancel()

@@ -10,9 +10,17 @@ final class PhysicalRotaryMonitor {
     private var manager: IOHIDManager?
     private var mainUsage: UInt32?
     private var clicks = PhysicalRotaryClicks()
+    private var longInterval = RotaryHoldTiming.defaultInterval
+    func setLongInterval(_ raw: Double) {
+        let value = RotaryHoldTiming.normalized(raw)
+        guard value != longInterval else { return }
+        longInterval = value
+        clickTimer?.cancel(); clickTimer = nil
+        clicks.setLongInterval(value)
+    }
     private var clickTimer: DispatchWorkItem?
     var eligible: () -> Bool = { false }
-    var onLongRelease: () -> Void = {}
+    var onLongPress: () -> Void = {}
     var onShortRelease: () -> Void = {}
     var onDoubleRelease: () -> Void = {}
     func cancelGesture() { clicks.cancel(); clickTimer?.cancel(); clickTimer = nil }
@@ -66,7 +74,7 @@ final class PhysicalRotaryMonitor {
             status = "无法读取旋钮初始状态；可从菜单栏点击“选择会话”。"; return false
         }
         let current = currentPointer.pointee.takeUnretainedValue()
-        clicks = PhysicalRotaryClicks(initiallyHeld: IOHIDValueGetIntegerValue(current) != 0)
+        clicks = PhysicalRotaryClicks(initiallyHeld: IOHIDValueGetIntegerValue(current) != 0, longInterval: longInterval)
         mainUsage = UInt32(entry.value); self.manager = manager
         IOHIDManagerRegisterInputValueCallback(manager, { context, _, _, value in
             guard let context else { return }
@@ -79,7 +87,7 @@ final class PhysicalRotaryMonitor {
             monitor.status = "VibeKey 监听已断开；重连后重新进入导航。"
         }, Unmanaged.passUnretained(self).toOpaque())
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-        status = "旋钮监听已就绪：短按切换编辑／浏览；双击切换 App；按住至少 0.65 秒松开返回会话列表。"
+        status = "旋钮监听已就绪：短按切换编辑／浏览；双击切换 App；按住达到设备设置的时长即打开会话列表，松开不确认。"
         return true
     }
 
@@ -99,7 +107,7 @@ final class PhysicalRotaryMonitor {
             switch action {
             case .single: onShortRelease()
             case .double: onDoubleRelease()
-            case .long: onLongRelease()
+            case .long: onLongPress()
             }
         }
     }
