@@ -26,7 +26,7 @@ final class MenuBarSystemAppearance: ObservableObject {
         defaults.set(NSApp.effectiveAppearance.name.rawValue, forKey: "menuIcon.status.nativeAppearance")
         defaults.set(swiftUIDark, forKey: "menuIcon.status.swiftUIDark")
         defaults.set(dark, forKey: "menuIcon.status.systemDark")
-        defaults.set(dark ? "light foreground" : "dark foreground", forKey: "menuIcon.status.body")
+        defaults.set(dark ? "black body" : "white body", forKey: "menuIcon.status.body")
         defaults.set(target.rawValue, forKey: "menuIcon.status.target")
     }
 }
@@ -117,11 +117,9 @@ enum WorkflowMenuIcon {
         return result
     }
     static func bodyColor(darkAppearance: Bool) -> NSColor {
-        var color = NSColor.labelColor
-        NSAppearance(named: darkAppearance ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance {
-            color = NSColor.labelColor.usingColorSpace(.sRGB)!
-        }
-        return color
+        // Explicit product requirement: dark appearance has a dark body,
+        // light appearance has a light body. App-colored dots are independent.
+        (darkAppearance ? NSColor.black : .white).usingColorSpace(.sRGB)!
     }
     static func bodyImage(connected: Bool, darkAppearance: Bool = false) -> CGImage {
         raster(primary: bodyColor(darkAppearance: darkAppearance), secondary: .clear, connected: connected)
@@ -198,7 +196,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         check(observer.dark == dark)
         let color = WorkflowMenuIcon.bodyColor(darkAppearance: observer.dark)
-        check(dark ? color.redComponent > 0.8 : color.redComponent < 0.2)
+        check(dark ? color.redComponent < 0.2 : color.redComponent > 0.8)
     }
     application.appearance = savedAppearance
     let report: [String: Any] = ["checks": checks, "failures": failures, "targets": results,
