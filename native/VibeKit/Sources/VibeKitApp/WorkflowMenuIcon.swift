@@ -87,16 +87,18 @@ enum WorkflowMenuIcon {
         }
         return result
     }
-    static func bodyImage(connected: Bool) -> CGImage { raster(primary: .white, secondary: .clear, connected: connected) }
+    static func bodyImage(connected: Bool, darkAppearance: Bool = false) -> CGImage {
+        raster(primary: darkAppearance ? .black : .white, secondary: .clear, connected: connected)
+    }
     static func pointScale(_ target: WorkflowTargetID) -> Double { target == .deepSeek ? 1.50 : 1.18 }
-    static func make(target: WorkflowTargetID, connected: Bool) -> NSImage {
-        let key = "\(target.rawValue)-\(connected)" as NSString
+    static func make(target: WorkflowTargetID, connected: Bool, darkAppearance: Bool = false) -> NSImage {
+        let key = "\(target.rawValue)-\(connected)-\(darkAppearance)" as NSString
         if let image = cache.object(forKey: key) { return image }
-        // Native SF Symbol palette: white primary dial, app-colored secondary perimeter dots.
+        // Only the dial follows appearance; the perimeter keeps the target App's color.
         let context = CGContext(data: nil, width: 72, height: 64, bitsPerComponent: 8, bytesPerRow: 72 * 4,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
-        context.draw(bodyImage(connected: connected), in: CGRect(x:0,y:0,width:72,height:64))
+        context.draw(bodyImage(connected: connected, darkAppearance: darkAppearance), in: CGRect(x:0,y:0,width:72,height:64))
         let dots = raster(primary: .clear, secondary: color(target), connected: connected)
         for (bounds, _) in points(connected: connected) {
             let crop = bounds.insetBy(dx:-1,dy:-1).intersection(CGRect(x:0,y:0,width:72,height:64)).integral
@@ -117,34 +119,38 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
     var checks = 0, failures = 0
     func check(_ value: Bool) { checks += 1; if !value { failures += 1 } }
     var results: [[String: Any]] = []
-    for connected in [true, false] { for target in WorkflowAppCycle.order {
-        let icon = WorkflowMenuIcon.make(target: target, connected: connected)
+    for darkAppearance in [false, true] { for connected in [true, false] { for target in WorkflowAppCycle.order {
+        let icon = WorkflowMenuIcon.make(target: target, connected: connected, darkAppearance: darkAppearance)
         let original = WorkflowMenuIcon.mask(connected: connected)
         let cg = icon.cgImage(forProposedRect: nil, context: nil, hints: nil)!
         let pixels = [UInt8](cg.dataProvider!.data! as Data)
         let tint = WorkflowMenuIcon.color(target).usingColorSpace(.sRGB)!
-        let bodyPixels = [UInt8](WorkflowMenuIcon.bodyImage(connected: connected).dataProvider!.data! as Data)
+        let bodyPixels = [UInt8](WorkflowMenuIcon.bodyImage(connected: connected, darkAppearance: darkAppearance).dataProvider!.data! as Data)
         var alphaMatches = true, bodyMatches = true, outerMatches = true
         for pixel in original.alpha.indices {
             if bodyPixels[pixel*4+3] > 0 { alphaMatches = alphaMatches && pixels[pixel*4+3] == bodyPixels[pixel*4+3] }
             guard pixels[pixel*4+3] > 240 else { continue }
             let body = bodyPixels[pixel*4+3] > 240
             let alpha = Double(pixels[pixel*4+3])
-            let expected = body ? [1.0,1.0,1.0] : [tint.redComponent,tint.greenComponent,tint.blueComponent]
+            let bodyValue = darkAppearance ? 0.0 : 1.0
+            let expected = body ? [bodyValue,bodyValue,bodyValue] : [tint.redComponent,tint.greenComponent,tint.blueComponent]
             let matches = (0..<3).allSatisfy { abs(Double(pixels[pixel * 4 + $0]) / alpha - expected[$0]) < 0.015 }
             if body { bodyMatches = bodyMatches && matches } else { outerMatches = outerMatches && matches }
         }
         check(!icon.isTemplate); check(alphaMatches); check(bodyMatches); check(outerMatches)
         check(WorkflowMenuIcon.points(connected: connected).count >= 6)
-        results.append(["target": target.rawValue, "connected": connected, "hex": WorkflowMenuIcon.menuHex(target),
+        let cached = WorkflowMenuIcon.make(target: target, connected: connected, darkAppearance: darkAppearance)
+        let opposite = WorkflowMenuIcon.make(target: target, connected: connected, darkAppearance: !darkAppearance)
+        check(cached === icon); check(opposite !== icon)
+        results.append(["target": target.rawValue, "connected": connected, "darkAppearance": darkAppearance, "hex": WorkflowMenuIcon.menuHex(target),
                         "originalDialBodyPreserved": alphaMatches, "bodyUnchanged": bodyMatches, "outerComponents": WorkflowMenuIcon.points(connected: connected).count, "pointScale": WorkflowMenuIcon.pointScale(target)])
         if connected {
-            let url = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("menu-\(target.rawValue).png")
+            let url = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("menu-\(target.rawValue)-\(darkAppearance ? "dark" : "light").png")
             if let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) {
                 CGImageDestinationAddImage(dest, cg, nil); CGImageDestinationFinalize(dest)
             }
         }
-    }}
+    }}}
     let report: [String: Any] = ["checks": checks, "failures": failures, "targets": results, "hardware_or_target_UI_access": false]
     do { try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path)) }
     catch { return 1 }

@@ -166,8 +166,10 @@ private struct PermissionMenuIcon: View {
     @ObservedObject var controller: CodexWorkflowController
     @ObservedObject private var permissions = PermissionCenter.shared
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
-        Image(nsImage: WorkflowMenuIcon.make(target: controller.activeTarget, connected: connected))
+        Image(nsImage: WorkflowMenuIcon.make(target: controller.activeTarget, connected: connected,
+                                             darkAppearance: colorScheme == .dark))
             .renderingMode(.original).frame(width: 18, height: 18)
             .accessibilityLabel("The Vibekey · " + WorkflowCatalog.target(controller.activeTarget).name)
             .help(L(permissions.allGranted ? "权限已全部授予" : "权限待完善"))
