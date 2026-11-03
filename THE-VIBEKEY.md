@@ -2,9 +2,9 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 51)
+## 1.0.0-preview.5 (build 52)
 
-- The menu-bar dial follows the menu label's appearance: black in dark appearance as requested, white in light appearance. Perimeter dots retain the same target-App colors and sizes in both appearances. Cached images are separated by appearance so system theme changes do not reuse the old dial color.
+- The menu-bar dial follows macOS's native appearance and semantic foreground: light in dark mode, dark in light mode. This supersedes build51's reversed fixed colors. Native effective-appearance observation updates the actual menu label independently of the settings window's theme and SwiftUI MenuBarExtra environment. Perimeter dots retain the same target-App colors and sizes in both appearances; the whole icon is never made a monochrome template.
 
 - Button 1 now offers hold-to-talk, enabled by default in Device Settings. It controls the current default input device's writable CoreAudio mute property: press opens input, release mutes it. It never records audio or changes gain, and retains the physical voice shortcut. In the selector, button 1 remains previous-page only.
 - Initial held keys, context transitions, input-device changes, disconnect and sleep require a fresh release before reopening. Normal quit leaves the controlled inputs muted; explicitly disabling the mode restores saved pre-mode mute states. Devices without a writable master input mute are reported unsupported; there is no silent volume fallback. Other apps may still hold an audio stream open and show an OS microphone indicator while input is muted. A crash while physically held cannot guarantee immediate re-muting; this is software input gating, not a hardware privacy switch.

@@ -1,6 +1,35 @@
 import AppKit
+import Combine
 import ImageIO
 import VibeKitHost
+
+/// MenuBarExtra's SwiftUI environment can differ from the system appearance.
+/// Follow the native application instead of the settings window's theme.
+@MainActor
+final class MenuBarSystemAppearance: ObservableObject {
+    @Published private(set) var dark = false
+    private var observation: NSKeyValueObservation?
+    init() {
+        let application = NSApplication.shared
+        refresh()
+        observation = application.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.refresh() }
+        }
+    }
+    private func refresh() {
+        let value = NSApplication.shared.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if value != dark { dark = value }
+    }
+    func recordMenuLabel(swiftUIDark: Bool, target: WorkflowTargetID) {
+        let defaults = UserDefaults.standard
+        defaults.set(Int(ProcessInfo.processInfo.processIdentifier), forKey: "menuIcon.status.pid")
+        defaults.set(NSApp.effectiveAppearance.name.rawValue, forKey: "menuIcon.status.nativeAppearance")
+        defaults.set(swiftUIDark, forKey: "menuIcon.status.swiftUIDark")
+        defaults.set(dark, forKey: "menuIcon.status.systemDark")
+        defaults.set(dark ? "light foreground" : "dark foreground", forKey: "menuIcon.status.body")
+        defaults.set(target.rawValue, forKey: "menuIcon.status.target")
+    }
+}
 
 enum WorkflowMenuIcon {
     struct Mask {
@@ -87,8 +116,15 @@ enum WorkflowMenuIcon {
         }
         return result
     }
+    static func bodyColor(darkAppearance: Bool) -> NSColor {
+        var color = NSColor.labelColor
+        NSAppearance(named: darkAppearance ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance {
+            color = NSColor.labelColor.usingColorSpace(.sRGB)!
+        }
+        return color
+    }
     static func bodyImage(connected: Bool, darkAppearance: Bool = false) -> CGImage {
-        raster(primary: darkAppearance ? .black : .white, secondary: .clear, connected: connected)
+        raster(primary: bodyColor(darkAppearance: darkAppearance), secondary: .clear, connected: connected)
     }
     static func pointScale(_ target: WorkflowTargetID) -> Double { target == .deepSeek ? 1.50 : 1.18 }
     static func make(target: WorkflowTargetID, connected: Bool, darkAppearance: Bool = false) -> NSImage {
@@ -115,6 +151,7 @@ enum WorkflowMenuIcon {
     }
 }
 
+@MainActor
 func runWorkflowMenuIconCheck(path: String) -> Int32 {
     var checks = 0, failures = 0
     func check(_ value: Bool) { checks += 1; if !value { failures += 1 } }
@@ -126,19 +163,20 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         let pixels = [UInt8](cg.dataProvider!.data! as Data)
         let tint = WorkflowMenuIcon.color(target).usingColorSpace(.sRGB)!
         let bodyPixels = [UInt8](WorkflowMenuIcon.bodyImage(connected: connected, darkAppearance: darkAppearance).dataProvider!.data! as Data)
-        var alphaMatches = true, bodyMatches = true, outerMatches = true
+        var alphaMatches = true, bodyMatches = true, outerMatches = true, bodySamples = 0
         for pixel in original.alpha.indices {
             if bodyPixels[pixel*4+3] > 0 { alphaMatches = alphaMatches && pixels[pixel*4+3] == bodyPixels[pixel*4+3] }
-            guard pixels[pixel*4+3] > 240 else { continue }
-            let body = bodyPixels[pixel*4+3] > 240
+            guard pixels[pixel*4+3] > 180 else { continue }
+            let body = bodyPixels[pixel*4+3] > 180
             let alpha = Double(pixels[pixel*4+3])
-            let bodyValue = darkAppearance ? 0.0 : 1.0
-            let expected = body ? [bodyValue,bodyValue,bodyValue] : [tint.redComponent,tint.greenComponent,tint.blueComponent]
+            let foreground = WorkflowMenuIcon.bodyColor(darkAppearance: darkAppearance)
+            let expected = body ? [foreground.redComponent,foreground.greenComponent,foreground.blueComponent] : [tint.redComponent,tint.greenComponent,tint.blueComponent]
             let matches = (0..<3).allSatisfy { abs(Double(pixels[pixel * 4 + $0]) / alpha - expected[$0]) < 0.015 }
-            if body { bodyMatches = bodyMatches && matches } else { outerMatches = outerMatches && matches }
+            if body { bodySamples += 1; bodyMatches = bodyMatches && matches } else { outerMatches = outerMatches && matches }
         }
         check(!icon.isTemplate); check(alphaMatches); check(bodyMatches); check(outerMatches)
         check(WorkflowMenuIcon.points(connected: connected).count >= 6)
+        check(bodySamples > 100)
         let cached = WorkflowMenuIcon.make(target: target, connected: connected, darkAppearance: darkAppearance)
         let opposite = WorkflowMenuIcon.make(target: target, connected: connected, darkAppearance: !darkAppearance)
         check(cached === icon); check(opposite !== icon)
@@ -151,7 +189,21 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
             }
         }
     }}}
-    let report: [String: Any] = ["checks": checks, "failures": failures, "targets": results, "hardware_or_target_UI_access": false]
+    // Change only this isolated check process, never the system setting.
+    let application = NSApplication.shared
+    let savedAppearance = application.appearance
+    let observer = MenuBarSystemAppearance()
+    for dark in [false, true, false, true] {
+        application.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        check(observer.dark == dark)
+        let color = WorkflowMenuIcon.bodyColor(darkAppearance: observer.dark)
+        check(dark ? color.redComponent > 0.8 : color.redComponent < 0.2)
+    }
+    application.appearance = savedAppearance
+    let report: [String: Any] = ["checks": checks, "failures": failures, "targets": results,
+                               "native_application_appearance_roundtrip": true,
+                               "system_setting_changed": false, "hardware_or_target_UI_access": false]
     do { try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path)) }
     catch { return 1 }
     print("Workflow menu icon checks: \(checks), failures: \(failures)")

@@ -167,13 +167,18 @@ private struct PermissionMenuIcon: View {
     @ObservedObject private var permissions = PermissionCenter.shared
     @Environment(\.openWindow) private var openWindow
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var systemAppearance = MenuBarSystemAppearance()
     var body: some View {
         Image(nsImage: WorkflowMenuIcon.make(target: controller.activeTarget, connected: connected,
-                                             darkAppearance: colorScheme == .dark))
+                                             darkAppearance: systemAppearance.dark))
             .renderingMode(.original).frame(width: 18, height: 18)
+            .id("\(controller.activeTarget.rawValue)-\(connected)-\(systemAppearance.dark)")
             .accessibilityLabel("The Vibekey · " + WorkflowCatalog.target(controller.activeTarget).name)
             .help(L(permissions.allGranted ? "权限已全部授予" : "权限待完善"))
-            .onAppear { openMainIfRequested() }
+            .onAppear {
+                systemAppearance.recordMenuLabel(swiftUIDark: colorScheme == .dark, target: controller.activeTarget)
+                openMainIfRequested()
+            }
             .onChange(of: permissions.shouldOpenMain) { _ in openMainIfRequested() }
     }
     private func openMainIfRequested() {
