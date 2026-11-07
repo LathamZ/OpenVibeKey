@@ -7,21 +7,26 @@ import VibeKitHost
 /// AppKit does not expose a public arbitrary blur-radius control. No screen capture.
 struct SessionScreenBackdrop: NSViewRepresentable {
     var strength: Double
+    var dimming: Double
     func makeNSView(context: Context) -> SelectorScreenMaterialView { SelectorScreenMaterialView() }
-    func updateNSView(_ view: SelectorScreenMaterialView, context: Context) { view.setStrength(strength) }
+    func updateNSView(_ view: SelectorScreenMaterialView, context: Context) { view.setStrength(strength); view.setDimming(dimming) }
 }
 
 final class SelectorScreenMaterialView: NSView {
     let effect = NSVisualEffectView()
+    let dimming = NSView()
     override init(frame: NSRect) {
         super.init(frame: frame)
         effect.material = .underWindowBackground
         effect.blendingMode = .behindWindow
         effect.state = .active
-        // Neutral glass, independent of the application's theme. Never add a black scrim.
+        // Keep blur and darkness independent; dim only the background, below all glass/text.
         effect.appearance = NSAppearance(named: .aqua)
         effect.autoresizingMask = [.width, .height]
         addSubview(effect)
+        dimming.wantsLayer = true
+        dimming.autoresizingMask = [.width, .height]
+        addSubview(dimming)
     }
     convenience init() { self.init(frame: .zero) }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
@@ -29,7 +34,14 @@ final class SelectorScreenMaterialView: NSView {
         let value = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : SessionOrbit.glass(strength)
         if abs(effect.alphaValue - value) > 0.0001 { effect.alphaValue = value }
     }
-    override func layout() { super.layout(); effect.frame = bounds }
+    func setDimming(_ raw: Double) {
+        let value = raw.isFinite ? min(0.8, max(0, raw)) : 0.5
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        dimming.layer?.backgroundColor = NSColor.black.withAlphaComponent(value).cgColor
+        CATransaction.commit()
+    }
+    var dimmingOpacity: Double { Double(dimming.layer?.backgroundColor?.alpha ?? 0) }
+    override func layout() { super.layout(); effect.frame = bounds; dimming.frame = bounds }
 }
 
 /// Synthetic backdrop for fixture-only compositor inspection, never part of normal selection UI.

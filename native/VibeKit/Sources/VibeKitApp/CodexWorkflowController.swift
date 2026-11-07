@@ -111,6 +111,11 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         wheelTintOpacity = raw.isFinite ? min(1, max(0, raw)) : 0.075
         if !preview { defaults.set(wheelTintOpacity, forKey: "sessionOrbit.tintOpacity.v1") }
     }
+    @Published private(set) var wheelDimming = 0.5
+    func setWheelDimming(_ raw: Double) {
+        wheelDimming = raw.isFinite ? min(0.8, max(0, raw)) : 0.5
+        if !preview { defaults.set(wheelDimming, forKey: "sessionOrbit.dim.v1") }
+    }
     @Published private(set) var wheelGlassStrength = 0.7
     func setWheelGlass(_ raw: Double) {
         wheelGlassStrength = SessionOrbit.glass(raw)
@@ -266,6 +271,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 }
             }
         if !preview, let saved = defaults.object(forKey: wheelStepsKey) as? Double { wheelStepsPerItem = SessionWheelMotion.steps(saved) }
+        if !preview, let saved = defaults.object(forKey: "sessionOrbit.dim.v1") as? Double {
+            wheelDimming = saved.isFinite ? min(0.8, max(0, saved)) : 0.5
+        }
         if !preview, let saved = defaults.object(forKey: "sessionOrbit.glass.v1") as? Double { wheelGlassStrength = SessionOrbit.glass(saved) }
         if !preview, let saved = defaults.object(forKey: "sessionOrbit.tintOpacity.v1") as? Double { wheelTintOpacity = saved.isFinite ? min(1, max(0, saved)) : 0.075 }
         if preview, CommandLine.arguments.contains("--preview-many-sessions") {

@@ -2,7 +2,7 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 54)
+## 1.0.0-preview.5 (build 55)
 
 - The menu-bar dial follows macOS's native appearance with the user's explicit color mapping: black body in dark appearance, white body in light appearance. This corrects build52's mistaken foreground inversion. Native effective-appearance observation updates the actual menu label independently of the settings window's theme and SwiftUI MenuBarExtra environment. Perimeter dots retain the same target-App colors and sizes in both appearances; the whole icon is never made a monochrome template.
 
@@ -16,7 +16,7 @@ A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), li
 
 - Device Settings owns the rotary hold duration (0.20–2.00s, 0.05s increments; default 1.00s), selection sensitivity, full-screen background blur strength and glass tint transparency. Duration changes persist and apply to the next press in both captured and pass-through paths.
 - Holding to the chosen duration opens the selector before release. Continued hold/repeat and the final release never confirm a conversation; timing changes during a press cancel that gesture until release.
-- The full-screen backdrop uses a neutral light material independent of the app theme, with no black scrim. Reduce Transparency uses the system opaque-material fallback. The selector covers the current display, not every connected display.
+- The full-screen backdrop now adds a separate black scrim (default 50%, adjustable 0–80% in Device Settings) above the neutral system blur and below all glass/cards/text, improving white-text contrast on bright desktops. Blur intensity, background dimming and glass tint transparency remain independent. This supersedes build54’s undimmed background. Reduce Transparency uses the system opaque-material fallback. The selector covers the current display, not every connected display.
 
 - Double rotary click preselects Codex → Claude → DeepSeek → WeChat (installed targets only). It changes the menu marker silently; it never launches or activates the target. Long rotary entry uses this selected target. Only confirming a conversation opens/activates its App.
 - Retains the original dial menu symbol and colors only its perimeter dots: Codex white, Claude orange, DeepSeek light sky blue (#82C9F5), WeChat green. DeepSeek dots are enlarged 50%, others 18%; selector halos retain the original App colors.

@@ -7,7 +7,7 @@ struct SessionSelectorView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                SessionScreenBackdrop(strength: controller.wheelGlassStrength)
+                SessionScreenBackdrop(strength: controller.wheelGlassStrength, dimming: controller.wheelDimming)
                     .allowsHitTesting(false)
                 Color.clear.contentShape(Rectangle())
                     .onTapGesture { controller.dismissSelector() }
@@ -220,6 +220,14 @@ struct WheelSensitivitySettings: View {
                 Text("\(Int(controller.wheelGlassStrength * 100))%").font(.caption.monospacedDigit()).frame(width: 40)
             }
             HStack {
+                Text("背景压暗程度").font(.callout)
+                Slider(value: Binding(get: { controller.wheelDimming }, set: { controller.setWheelDimming($0) }), in: 0...0.8)
+                    .accessibilityLabel("背景压暗程度")
+                Text("\(Int(controller.wheelDimming * 100))%").font(.caption.monospacedDigit()).frame(width: 40)
+            }
+            Text("默认压暗50%，只作用于背景；圆盘、卡片和白色标题不会一起变暗。")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
                 Text("底色透明度").font(.callout)
                 Slider(value: Binding(get: { 1 - controller.wheelTintOpacity }, set: { controller.setWheelTintOpacity(1 - $0) }), in: 0...1)
                     .accessibilityLabel("底色透明度")
@@ -297,6 +305,17 @@ func runWheelPersistenceCheck(outputPath: String) -> Int32 {
     defaults.set(-10.0, forKey: RotaryHoldTiming.preferenceKey)
     let seventh = CodexWorkflowController(defaults: defaults)
     checks["stored_hold_timing_is_clamped"] = seventh.rotaryHoldInterval == RotaryHoldTiming.range.lowerBound
+    checks["dimming_defaults_to_half"] = seventh.wheelDimming == 0.5
+    seventh.setWheelDimming(0.63)
+    let eighth = CodexWorkflowController(defaults: defaults)
+    checks["dimming_survives_recreation"] = eighth.wheelDimming == 0.63
+    checks["dimming_does_not_change_blur_or_tint"] = eighth.wheelGlassStrength == 1 && eighth.wheelTintOpacity == 1
+    eighth.setWheelDimming(.nan)
+    checks["invalid_dimming_uses_default"] = eighth.wheelDimming == 0.5
+    eighth.setWheelDimming(-1)
+    checks["dimming_can_be_disabled"] = eighth.wheelDimming == 0
+    eighth.setWheelDimming(1)
+    checks["dimming_cannot_fully_obscure_background"] = eighth.wheelDimming == 0.8
     let passed = checks.values.allSatisfy { $0 }
     let result: [String: Any] = ["passed": passed, "checks": checks, "hardware_started": false, "target_app_control": false, "isolated_preferences": true]
     do { try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: outputPath)) }
@@ -353,6 +372,13 @@ func runSelectorBackdropCheck(controller: CodexWorkflowController, outputPath: S
         verifyStrength(0, name: "slider_zero_disables_background") {
             verifyStrength(0.35, name: "slider_updates_visible_background") {
                 verifyStrength(1, name: "slider_full_material") {
+                    controller.selectorMaterial?.setDimming(0.5)
+                    checks["default_dimming_layer_visible"] = controller.selectorMaterial?.dimmingOpacity == 0.5
+                    checks["dimming_covers_same_fullscreen_bounds"] = controller.selectorMaterial.map { $0.dimming.frame == $0.bounds && $0.effect.frame == $0.bounds } ?? false
+                    controller.selectorMaterial?.setDimming(0.25)
+                    checks["dimming_updates_without_changing_blur"] = controller.selectorMaterial.map { abs($0.dimmingOpacity - 0.25) < 0.0001 && $0.effect.alphaValue == 1 } ?? false
+                    controller.selectorMaterial?.setDimming(0)
+                    checks["dimming_can_be_disabled_without_disabling_blur"] = controller.selectorMaterial.map { $0.dimmingOpacity == 0 && $0.effect.alphaValue == 1 } ?? false
                     let selected = controller.navigation.selected?.id
                     for _ in 0..<100 { controller.gesture(.long, control: .dial) }
                     checks["repeat_hold_preserves_selection_and_coverage"] = controller.navigation.selected?.id == selected && controller.selectorCoversScreen && controller.selectorIsVisible
