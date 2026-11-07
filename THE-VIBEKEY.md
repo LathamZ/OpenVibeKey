@@ -2,7 +2,7 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 53)
+## 1.0.0-preview.5 (build 54)
 
 - The menu-bar dial follows macOS's native appearance with the user's explicit color mapping: black body in dark appearance, white body in light appearance. This corrects build52's mistaken foreground inversion. Native effective-appearance observation updates the actual menu label independently of the settings window's theme and SwiftUI MenuBarExtra environment. Perimeter dots retain the same target-App colors and sizes in both appearances; the whole icon is never made a monochrome template.
 
@@ -11,11 +11,12 @@ A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), li
 - The input-level meter creates its capture engine only for an explicit test and releases it on stop; idle settings no longer touch inputNode.
 
 - Repeated long holds while the selector is already open preserve its highlight, page, snapshot and gesture/capture ownership; an outstanding confirmed open also keeps its request ID.
-- The central 650×300 ellipse now fades continuously from its center to its edge with a smooth falloff, replacing the solid inner 85% and short outer fade. Existing glass/tint preferences are retained.
+- Conversation selection now covers the current display with one neutral behind-window system material. Device Settings → 背景模糊强度 blends that material from 0% (off) to 100%; this is public compositor material intensity, not an arbitrary blur-radius API. The existing sessionOrbit.glass.v1 preference and current user value are retained.
+- The central 650×300 ellipse is an independent transparent glass disc with App-colored tint and subtle optical reflections. It and the cards add no second backdrop blur. The separate tint-transparency preference, white titles and orbit geometry remain. Closing, confirming, suspending or stopping hides the single owned overlay; display configuration changes resize it to its current screen. Clicking the surrounding background also cancels.
 
-- Device Settings owns the rotary hold duration (0.20–2.00s, 0.05s increments; default 1.00s), selection sensitivity, glass strength and tint transparency. Duration changes persist and apply to the next press in both captured and pass-through paths.
+- Device Settings owns the rotary hold duration (0.20–2.00s, 0.05s increments; default 1.00s), selection sensitivity, full-screen background blur strength and glass tint transparency. Duration changes persist and apply to the next press in both captured and pass-through paths.
 - Holding to the chosen duration opens the selector before release. Continued hold/repeat and the final release never confirm a conversation; timing changes during a press cancel that gesture until release.
-- Selector glass uses a neutral light material independent of white text or the app's dark theme. No forced dark backdrop is added; the visible desktop still contributes to real behind-window blur.
+- The full-screen backdrop uses a neutral light material independent of the app theme, with no black scrim. Reduce Transparency uses the system opaque-material fallback. The selector covers the current display, not every connected display.
 
 - Double rotary click preselects Codex → Claude → DeepSeek → WeChat (installed targets only). It changes the menu marker silently; it never launches or activates the target. Long rotary entry uses this selected target. Only confirming a conversation opens/activates its App.
 - Retains the original dial menu symbol and colors only its perimeter dots: Codex white, Claude orange, DeepSeek light sky blue (#82C9F5), WeChat green. DeepSeek dots are enlarged 50%, others 18%; selector halos retain the original App colors.

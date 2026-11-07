@@ -9,6 +9,8 @@ private final class SessionWheelPanel: NSPanel {
         if modifiers.isEmpty, selectorKey?(event.keyCode) == true { return }
         super.keyDown(with: event)
     }
+    // A borderless overlay must cover the complete display, including areas outside visibleFrame.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
@@ -201,6 +203,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private var notice: NSPanel?
     private var noticeGeneration = UUID()
     private var observer: NSObjectProtocol?
+    private var screenObserver: NSObjectProtocol?
     private let defaults: UserDefaults
     private let preview: Bool
     private let sessionKey = "codexNavigation.sessions.v1"
@@ -254,6 +257,14 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         if !preview, let data = defaults.data(forKey: colorKey), let saved = try? JSONDecoder().decode(SessionColorLedger.self, from: data) { colorLedger = SessionColorLedger(colors: saved.colors) }
         if !preview, let data = defaults.data(forKey: openedKey), let saved = try? JSONDecoder().decode([String: Double].self, from: data) { localOpened = saved.filter { $0.value.isFinite && $0.value >= 0 } }
         super.init()
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, let panel = self.panel, panel.isVisible else { return }
+                    let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
+                    if let screen { panel.setFrame(screen.frame, display: true) }
+                }
+            }
         if !preview, let saved = defaults.object(forKey: wheelStepsKey) as? Double { wheelStepsPerItem = SessionWheelMotion.steps(saved) }
         if !preview, let saved = defaults.object(forKey: "sessionOrbit.glass.v1") as? Double { wheelGlassStrength = SessionOrbit.glass(saved) }
         if !preview, let saved = defaults.object(forKey: "sessionOrbit.tintOpacity.v1") as? Double { wheelTintOpacity = saved.isFinite ? min(1, max(0, saved)) : 0.075 }
@@ -288,6 +299,10 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 }
             }
         if !preview { DispatchQueue.main.async { [weak self] in self?.refreshSessions() } }
+    }
+    deinit {
+        if let observer { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
     }
     func configureNativeFocus(enabled: Bool, mainKey: String) {
         guard !ready, !busy, !hasRecovery, NativeFocusShortcut.allowedMainKeys.contains(mainKey) else { return }
@@ -594,12 +609,15 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         }
     }
     private func present() {
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let frame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 1000)
         if panel == nil {
-            let panel = SessionWheelPanel(contentRect: NSRect(x: 0, y: 0, width: wheelPanelSize.width, height: wheelPanelSize.height),
+            let panel = SessionWheelPanel(contentRect: frame,
                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.title = "选择会话"
             panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
-            panel.isMovableByWindowBackground = true
+            panel.isMovableByWindowBackground = false
+            panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             panel.isFloatingPanel = true; panel.becomesKeyOnlyIfNeeded = false
             panel.isReleasedWhenClosed = false; panel.level = .floating; panel.hidesOnDeactivate = false
             panel.selectorKey = { [weak self] code in
@@ -616,17 +634,29 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 return true
             }
             panel.delegate = self
-            panel.contentView = NSHostingView(rootView: SessionWheelView(controller: self))
-            panel.center(); self.panel = panel
+            panel.contentView = NSHostingView(rootView: SessionSelectorView(controller: self))
+            self.panel = panel
         }
         // This is our own window. Keep native Backspace in the visible selector,
         // instead of leaving keyboard focus in the composer behind it.
+        panel?.setFrame(frame, display: true)
         NSApplication.shared.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
     }
     var selectorIsTransparentOverlay: Bool {
         guard let panel else { return false }
         return !panel.isOpaque && panel.backgroundColor.alphaComponent == 0 && !panel.styleMask.contains(.titled)
+    }
+    var selectorCoversScreen: Bool {
+        guard let panel, let screen = panel.screen else { return false }
+        return panel.frame == screen.frame
+    }
+    var selectorMaterial: SelectorScreenMaterialView? {
+        func find(_ view: NSView) -> SelectorScreenMaterialView? {
+            if let match = view as? SelectorScreenMaterialView { return match }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        return panel?.contentView.flatMap(find)
     }
     var selectorIsKeyWindow: Bool { panel?.isKeyWindow == true }
     var selectorIsVisible: Bool { panel?.isVisible == true }
@@ -646,7 +676,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         }
         captureRotaryForNavigation()
         message = "已取消会话选择；原会话保持不变。"
-        if preview { NSApplication.shared.stop(nil) }
+        if preview && !CommandLine.arguments.contains("--preview-backdrop-check") { NSApplication.shared.stop(nil) }
     }
 }
 
@@ -726,7 +756,7 @@ func runCodexNavigationPreview() {
     // It never reads another application's content or initializes the device backend.
     var referenceWindow: NSWindow?
     if CommandLine.arguments.contains("--preview-reference-backdrop") {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
+        let window = NSWindow(contentRect: NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 1000),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.title = "玻璃材质 · 合成参考背景"
         window.isReleasedWhenClosed = false
@@ -739,6 +769,9 @@ func runCodexNavigationPreview() {
     if let i = CommandLine.arguments.firstIndex(of: "--preview-wheel-page"), i + 1 < CommandLine.arguments.count,
        let page = Int(CommandLine.arguments[i + 1]) { controller.turnWheelPage(page) }
     if CommandLine.arguments.contains("--preview-empty-wheel") { controller.selectorQuery = "no-fixture-matches"; controller.applySelectorQuery() }
+    if let i = CommandLine.arguments.firstIndex(of: "--preview-backdrop-check"), i + 1 < CommandLine.arguments.count {
+        runSelectorBackdropCheck(controller: controller, outputPath: CommandLine.arguments[i + 1])
+    }
     if let i = CommandLine.arguments.firstIndex(of: "--preview-motion-check"), i + 1 < CommandLine.arguments.count {
         runWheelMotionCheck(controller: controller, outputPath: CommandLine.arguments[i + 1])
     }

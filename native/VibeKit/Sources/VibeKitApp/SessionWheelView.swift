@@ -1,6 +1,24 @@
 import SwiftUI
 import VibeKitHost
 
+/// One owned window contains both layers, so every existing close/hide path removes the blur.
+struct SessionSelectorView: View {
+    @ObservedObject var controller: CodexWorkflowController
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                SessionScreenBackdrop(strength: controller.wheelGlassStrength)
+                    .allowsHitTesting(false)
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { controller.dismissSelector() }
+                SessionWheelView(controller: controller)
+                    .frame(width: min(1000, max(1, geometry.size.width - 32)),
+                           height: min(680, max(1, geometry.size.height - 32)))
+            }.frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+}
+
 /// The floating, continuous orbit. Teaching belongs in settings, never in the selection layer.
 struct SessionWheelView: View {
     @ObservedObject var controller: CodexWorkflowController
@@ -11,11 +29,9 @@ struct SessionWheelView: View {
             let scale = min(geometry.size.width / 1000, geometry.size.height / 680)
             ZStack {
                 ZStack {
-                    ZStack {
-                        SessionOrbitBackdrop(strength: controller.wheelGlassStrength, card: true)
-                        Color(wheelHex: controller.selectorHaloHex).opacity(controller.wheelTintOpacity)
-                    }.frame(width: 650, height: 300)
-                        .mask { OrbitEllipseFade() }
+                    OrbitGlassDisc(tint: Color(wheelHex: controller.selectorHaloHex),
+                                   opacity: controller.wheelTintOpacity)
+                        .frame(width: 650, height: 300)
                         .allowsHitTesting(false).position(x: 500, y: 325)
                     centerInformation.position(x: 500, y: 325)
                     OrbitCards(controller: controller, position: controller.wheelPosition)
@@ -40,8 +56,7 @@ struct SessionWheelView: View {
                 }.frame(width: 1000, height: 680).scaleEffect(scale)
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
-        }.frame(width: controller.wheelPanelSize.width, height: controller.wheelPanelSize.height)
-            .background(Color.clear)
+        }.background(Color.clear)
     }
     private var centerInformation: some View {
         VStack(spacing: 11) {
@@ -64,17 +79,27 @@ struct SessionWheelView: View {
     }
 }
 
-/// Same 650×300 ellipse, with a smooth center-to-edge falloff across the full radius.
-private struct OrbitEllipseFade: View {
+/// Transparent optical surface only: no material, backdrop filter or second blur pass.
+private struct OrbitGlassDisc: View {
+    let tint: Color
+    let opacity: Double
     var body: some View {
-        RadialGradient(stops: (0...64).map { index in
-            let radius = Double(index) / 64
-            return .init(color: .white.opacity(SessionOrbit.centerFadeAlpha(radius: radius)), location: radius)
-        },
-                       center: .center, startRadius: 0, endRadius: 325)
-            .frame(width: 650, height: 650)
-            .scaleEffect(x: 1, y: 300.0 / 650.0)
-            .frame(width: 650, height: 300).clipped()
+        Ellipse()
+            .fill(RadialGradient(colors: [tint.opacity(opacity), tint.opacity(opacity * 0.38)],
+                                 center: .center, startRadius: 0, endRadius: 325))
+            .overlay {
+                Ellipse().fill(LinearGradient(stops: [
+                    .init(color: .white.opacity(0.13), location: 0),
+                    .init(color: .white.opacity(0.025), location: 0.34),
+                    .init(color: .clear, location: 0.60),
+                    .init(color: .white.opacity(0.045), location: 1)
+                ], startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+            .overlay {
+                Ellipse().strokeBorder(LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.015), .white.opacity(0.10)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.65)
+            }
+            .accessibilityHidden(true)
     }
 }
 
@@ -111,7 +136,7 @@ private struct OrbitCards: View, Animatable {
             }.padding(.horizontal, 18).padding(.vertical, 14).frame(width: 208, height: 86, alignment: .topLeading)
                 .background {
                     ZStack {
-                        SessionOrbitBackdrop(strength: controller.wheelGlassStrength, card: true)
+                        RoundedRectangle(cornerRadius: 15).fill(LinearGradient(colors: [.white.opacity(0.10), .white.opacity(0.025)], startPoint: .topLeading, endPoint: .bottomTrailing))
                         RoundedRectangle(cornerRadius: 15)
                             .fill(Color(wheelHex: controller.selectorHaloHex).opacity(min(1, controller.wheelTintOpacity * (selected ? 1.4666667 : 0.7333333))))
                     }.clipShape(RoundedRectangle(cornerRadius: 15)).allowsHitTesting(false)
@@ -189,9 +214,9 @@ struct WheelSensitivitySettings: View {
             Text("每个会话间距对应 \(Int(controller.wheelStepsPerItem)) 格旋转；停下时吸附到最近一项。")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
-                Text("玻璃浓度").font(.callout)
+                Text("背景模糊强度").font(.callout)
                 Slider(value: Binding(get: { controller.wheelGlassStrength }, set: { controller.setWheelGlass($0) }), in: 0...1)
-                    .accessibilityLabel("局部玻璃浓度")
+                    .accessibilityLabel("全屏背景模糊强度")
                 Text("\(Int(controller.wheelGlassStrength * 100))%").font(.caption.monospacedDigit()).frame(width: 40)
             }
             HStack {
@@ -200,9 +225,9 @@ struct WheelSensitivitySettings: View {
                     .accessibilityLabel("底色透明度")
                 Text("\(Int((1 - controller.wheelTintOpacity) * 100))%").font(.caption.monospacedDigit()).frame(width: 40)
             }
-            Text("100% 为完全透明底色；玻璃浓度单独调整。")
+            Text("100% 为完全透明底色；不影响背景模糊强度。")
                 .font(.caption).foregroundStyle(.secondary)
-            Text("同时调整会话卡片与中间椭圆区域；系统“降低透明度”开启时使用系统不透明材质。")
+            Text("背景覆盖当前屏幕，0% 关闭，100% 为完整系统模糊材质；中间圆盘与卡片独立显示透明玻璃，不重复模糊。系统开启“降低透明度”时使用不透明背景。")
                 .font(.caption).foregroundStyle(.secondary)
             Text("只影响会话选择，不改变文字左右移动或正文翻页。吸附为视觉效果。")
                 .font(.caption).foregroundStyle(.secondary)
@@ -304,6 +329,47 @@ func runWheelMotionCheck(controller: CodexWorkflowController, outputPath: String
                 do { try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: outputPath)) }
                 catch { exit(1) }
                 print("WHEEL_MOTION_CHECK=\(passed)"); fflush(stdout); exit(passed ? 0 : 1)
+            }
+        }
+    }
+}
+
+/// Exercises the native window and material with synthetic conversations only.
+@MainActor
+func runSelectorBackdropCheck(controller: CodexWorkflowController, outputPath: String) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        var checks = [String: Bool]()
+        checks["full_screen_on_presentation"] = controller.selectorCoversScreen
+        checks["transparent_owned_key_window"] = controller.selectorIsTransparentOverlay && controller.selectorIsKeyWindow
+        checks["one_fullscreen_material"] = controller.selectorMaterial != nil
+        let expectedReduced = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        @MainActor func verifyStrength(_ strength: Double, name: String, completion: @escaping @MainActor () -> Void) {
+            controller.setWheelGlass(strength)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                checks[name] = controller.selectorMaterial.map { abs($0.effect.alphaValue - (expectedReduced ? 1 : strength)) < 0.0001 } ?? false
+                completion()
+            }
+        }
+        verifyStrength(0, name: "slider_zero_disables_background") {
+            verifyStrength(0.35, name: "slider_updates_visible_background") {
+                verifyStrength(1, name: "slider_full_material") {
+                    let selected = controller.navigation.selected?.id
+                    for _ in 0..<100 { controller.gesture(.long, control: .dial) }
+                    checks["repeat_hold_preserves_selection_and_coverage"] = controller.navigation.selected?.id == selected && controller.selectorCoversScreen && controller.selectorIsVisible
+                    controller.dismissSelector()
+                    checks["cancel_removes_entire_overlay"] = !controller.selectorIsVisible && controller.navigation.stage == .idle
+                    controller.enter()
+                    checks["reopen_covers_screen"] = controller.selectorIsVisible && controller.selectorCoversScreen
+                    controller.suspend(message: "")
+                    checks["suspend_removes_entire_overlay"] = !controller.selectorIsVisible
+                    controller.enter(); controller.stop()
+                    checks["stop_removes_entire_overlay"] = !controller.selectorIsVisible
+                    let passed = checks.values.allSatisfy { $0 }
+                    let data: [String: Any] = ["passed": passed, "checks": checks, "fixture_only": true, "hardware_started": false, "target_app_control": false, "system_reduce_transparency": expectedReduced]
+                    do { try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: outputPath)) }
+                    catch { exit(1) }
+                    print("SELECTOR_BACKDROP_CHECK=\(passed)"); fflush(stdout); exit(passed ? 0 : 1)
+                }
             }
         }
     }
