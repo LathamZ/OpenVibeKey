@@ -103,7 +103,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                         Text("日常转动是左右移动；进入已适配的会话后，用同一套手势编辑、浏览和切换。")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 10) {
-                            Button("选择会话") { if !preview { controller.enter(inferForeground: false) } }.buttonStyle(.borderedProminent).disabled(!preview && (!controller.ready || controller.activeTarget == .weChat))
+                            Button("选择会话") { if !preview { controller.enter(inferForeground: false) } }.buttonStyle(.borderedProminent).disabled(!preview && !controller.ready)
                             Menu(WorkflowCatalog.target(controller.activeTarget).name) {
                                 Button("Codex") { if !preview { controller.selectTarget(.codex) } }
                                 Button("DeepSeek Harness") { if !preview { controller.selectTarget(.deepSeek) } }
@@ -111,7 +111,7 @@ struct WorkspaceShell<DeviceSettings: View>: View {
                                 Button("微信") { if !preview { controller.selectTarget(.weChat) } }
                             }
                             Button("切换 App") { if !preview { controller.cycleApplication() } }.disabled(controller.switchingApplication || controller.busy)
-                            Button("管理会话") { if !preview { openWindow(id: "session-management") } }.buttonStyle(.bordered).disabled(controller.activeTarget != .codex)
+                            Button("管理会话") { if !preview { openWindow(id: "session-management") } }.buttonStyle(.bordered).disabled(controller.activeTarget != .codex && controller.activeTarget != .weChat)
                         }
                     }
                 }
@@ -184,9 +184,10 @@ struct WorkspaceShell<DeviceSettings: View>: View {
             workspaceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(target.name).font(.title3.bold())
-                    if target.id != .weChat {
-                        Button("打开会话选择器") { if !preview { controller.enter(target: target.id) } }
-                            .disabled(!preview && !controller.ready)
+                    Button("打开会话选择器") { if !preview { controller.enter(target: target.id) } }
+                        .disabled(!preview && !controller.ready)
+                    if target.id == .weChat {
+                        Button("管理常用会话") { controller.selectTarget(.weChat); openWindow(id: "session-management") }
                     }
                     Text(target.detail).font(.callout)
                     Text(target.nextStep).font(.callout).foregroundStyle(.secondary)

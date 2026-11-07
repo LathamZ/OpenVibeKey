@@ -562,7 +562,7 @@ do {
     let roundtrip = try! JSONDecoder().decode(CodexSession.self, from: JSONEncoder().encode(foreign))
     check("external session preserves target through coding", roundtrip == foreign && roundtrip.target == .deepSeek)
     check("Claude desktop has a separate target", CodexSession(adapterReference: id, title: "reviewer", target: .claudeCode)?.target == .claudeCode)
-    check("WeChat is outside external adapter scope", CodexSession(adapterReference: id, title: "Chat", target: .weChat) == nil)
+    check("WeChat favorites have explicitly tagged local identity", CodexSession(adapterReference: id, title: "Chat", target: .weChat)?.target == .weChat)
     check("external handle is strictly UUID", CodexSession(adapterReference: "../arbitrary", title: "Chat", target: .deepSeek) == nil)
     check("foreign IDs never enter Codex reference parser", CodexSession(reference: "dsh://open", title: "Chat") == nil)
     check("DeepSeek content pages are explicitly target-scoped", NativePageScroll.desired(enabled: true, ready: true, contentSelected: true, frontmostBundleID: "com.deepseek.dsh", contentBundleID: "com.deepseek.dsh") == .pages)

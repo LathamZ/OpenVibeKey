@@ -21,6 +21,8 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private let deepSeekAdapter = DesktopAccessibilityAdapter(target: .deepSeek)
     private let claudeAdapter = DesktopAccessibilityAdapter(target: .claudeCode)
     @Published private(set) var activeTarget: WorkflowTargetID = .codex
+    @Published private(set) var weChatFavorites: [CodexSession] = []
+    var canPresentSelector: Bool { activeTarget == .weChat || WorkflowCatalog.supports(.conversations, in: activeTarget) }
     @Published private(set) var adapterSessions: [CodexSession] = []
     var contentBundleID: String { activeTarget.bundleID ?? "" }
     private struct Context {
@@ -89,7 +91,13 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private var desktopListTask: Task<DesktopAccessibilityAdapter.Listing, Error>?
     private var selectorInteracted = false
     private var currentSessionIDs: [String: String] = [:]
-    var sessions: [CodexSession] { activeTarget == .codex ? CodexSessionCatalog.merge(pinned: pinnedSessions, recent: recentThreads) : adapterSessions }
+    var sessions: [CodexSession] {
+        switch activeTarget {
+        case .codex: return CodexSessionCatalog.merge(pinned: pinnedSessions, recent: recentThreads)
+        case .weChat: return weChatFavorites
+        default: return adapterSessions
+        }
+    }
     var projectNames: [String: String] { Dictionary(recentThreads.map { ($0.session.id, $0.project) }, uniquingKeysWith: { first, _ in first }) }
     var filteredSessions: [CodexSession] { CodexSessionCatalog.filter(sessions, query: selectorQuery, projects: projectNames) }
     func isPinned(_ id: String) -> Bool { pinnedSessions.contains { $0.id == id } }
@@ -161,7 +169,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     var wheelSessions: [CodexSession] {
         let activity = activeTarget == .codex
             ? Dictionary(recentThreads.map { ($0.session.id, Double($0.updatedAt)) }, uniquingKeysWith: max)
-            : Dictionary(adapterSessions.enumerated().map { ($0.element.id, Double(adapterSessions.count - $0.offset)) }, uniquingKeysWith: max)
+            : Dictionary(sessions.enumerated().map { ($0.element.id, Double(sessions.count - $0.offset)) }, uniquingKeysWith: max)
         return SessionWheelPaging.ordered(filteredSessions, activity: activity, opened: localOpened)
     }
     private func recordOpened(_ session: CodexSession) {
@@ -261,6 +269,11 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         } else {
             self.pinnedSessions = []
         }
+        if !preview, let data = defaults.data(forKey: "workflow.weChat.favorites.v1"),
+           let saved = try? JSONDecoder().decode([CodexSession].self, from: data) {
+            var seenIDs = Set<String>(), seenNames = Set<String>()
+            weChatFavorites = saved.filter { $0.target == .weChat && $0.isValid && seenIDs.insert($0.id).inserted && seenNames.insert($0.title).inserted }
+        }
         nativeFocusMainKey = WorkflowDefaults.focusMainKey
         nativeFocusConfigured = WorkflowDefaults.nativeFocus
         nativePageScrollEnabled = WorkflowDefaults.browsingPages
@@ -340,6 +353,22 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private func captureRotaryForNavigation() {
         nativeFocusActive = routePhysicalFocus?(false) ?? false
     }
+    @discardableResult func addWeChatFavorite(title raw: String) -> Bool {
+        guard navigation.stage != .choosing, navigation.stage != .opening else { return false }
+        let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title.count <= 100, title.rangeOfCharacter(from: .controlCharacters) == nil,
+              !weChatFavorites.contains(where: { $0.title == title }),
+              let session = CodexSession(adapterReference: UUID().uuidString, title: title, target: .weChat) else { return false }
+        weChatFavorites.append(session); persistWeChatFavorites(); ensureColors(); return true
+    }
+    func removeWeChatFavorite(_ id: String) {
+        guard navigation.stage != .choosing, navigation.stage != .opening else { return }
+        weChatFavorites.removeAll { $0.id == id }; persistWeChatFavorites()
+    }
+    private func persistWeChatFavorites() {
+        guard !preview, let data = try? JSONEncoder().encode(weChatFavorites) else { return }
+        defaults.set(data, forKey: "workflow.weChat.favorites.v1")
+    }
     func addSession(reference: String, title: String) -> Bool {
         guard activeTarget == .codex else { return false }
         guard navigation.stage != .choosing, navigation.stage != .opening else {
@@ -370,7 +399,14 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         refreshing = false; selectorLoading = false
     }
     func refreshSessions(replaceSelector: Bool = false) {
-        guard !preview, activeTarget != .weChat else { return }
+        if activeTarget == .weChat {
+            cancelRefresh(); refreshError = nil
+            listStatus = weChatFavorites.isEmpty ? "尚未配置常用会话。" : "已配置 \(weChatFavorites.count) 个常用会话；微信自动打开仍待接口验证。"
+            ensureColors()
+            if replaceSelector, navigation.stage == .choosing, !selectorInteracted { enterWheel(preferredID: navigation.selected?.id) }
+            return
+        }
+        guard !preview else { return }
         if refreshing {
             if replaceSelector { selectorLoading = navigation.candidates.isEmpty }
             return
@@ -443,7 +479,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         // Also preserve an in-flight confirmed open and its completion request ID.
         guard navigation.stage != .choosing, navigation.stage != .opening else { return }
         if inferForeground, !preview, let target = WorkflowAppCycle.order.first(where: { $0.bundleID == NSWorkspace.shared.frontmostApplication?.bundleIdentifier }) { selectTarget(target) }
-        guard WorkflowCatalog.supports(.conversations, in: activeTarget) else { return }
+        guard canPresentSelector else { return }
         selectorGeneration = UUID()
         cancelPendingGestures?(); selectorQuery = ""; selectorInteracted = false; enterWheel()
         captureRotaryForNavigation()
@@ -462,7 +498,6 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     func gesture(_ action: PressGesture.Action, control: CodexNavigation.Control) {
         guard (ready || preview), !switchingApplication else { return }
         if action == .double, control == .dial { cycleApplication(); return }
-        guard activeTarget != .weChat else { return }
         if action == .long { enter(); return }
         guard !pageRoutingBusy else { return }
         if selectorLoading, control == .dial { return }
@@ -536,6 +571,12 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         if preview {
             navigation.dispatched(request: request, session: session, accepted: true)
             message = "预览：已模拟打开请求，没有启动或控制 Codex。"; return
+        }
+        if activeTarget == .weChat {
+            // Local favorite selection is not evidence that WeChat accepted a chat open.
+            navigation.dispatched(request: request, session: session, accepted: false)
+            refreshError = "微信自动打开尚未验证；未切换聊天。"
+            message = refreshError ?? ""; present(); return
         }
         if activeTarget != .codex {
             let target = activeTarget

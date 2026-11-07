@@ -3,6 +3,7 @@
 import SwiftUI
 import AppKit
 import VibeKitAudio
+import VibeKitHost
 import ServiceManagement
 
 // 菜单栏迷你面板：高频操作不用开设置窗。状态全部来自共享的 VibeVM，不新增任何设备命令。
@@ -58,6 +59,7 @@ struct MiniPanel: View {
                 Spacer()
                 Button(L("权限检查")) { permissions.present() }
             }
+            WorkflowTargetMenu(controller: vm.codexWorkflow)
             Divider()
             // 输入设备段：段标题 + 刷新按钮 + 逐行列表，取代原来"一个 Picker + 一个锁按钮"。
             // 数据/操作仍是同一套 VibeVM 成员：currentInput/inputDevices/setInput/enforceVibeMic/
@@ -192,5 +194,31 @@ struct MiniPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(GhostButtonStyle())
+    }
+}
+
+
+/// Target preselection is live even while the popover remains open; it never activates another App.
+struct WorkflowTargetMenu: View {
+    @ObservedObject var controller: CodexWorkflowController
+    var body: some View {
+        HStack(spacing: 10) {
+            WorkflowAppIcon(target: controller.activeTarget, size: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("当前 App").font(.caption).foregroundStyle(.secondary)
+                Menu {
+                    ForEach(WorkflowCatalog.targets) { target in
+                        Button { controller.selectTarget(target.id) } label: {
+                            Label(target.name, systemImage: controller.activeTarget == target.id ? "checkmark" : target.symbol)
+                        }
+                    }
+                } label: { Text(WorkflowCatalog.target(controller.activeTarget).name).font(.callout.weight(.semibold)) }
+                .menuStyle(.borderlessButton).fixedSize()
+                .disabled(controller.busy || controller.switchingApplication || controller.navigation.stage == .opening)
+            }
+            Spacer()
+        }.padding(.horizontal, 8).padding(.vertical, 6)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("当前 App：" + WorkflowCatalog.target(controller.activeTarget).name)
     }
 }

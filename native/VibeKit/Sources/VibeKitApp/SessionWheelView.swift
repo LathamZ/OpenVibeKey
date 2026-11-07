@@ -52,6 +52,7 @@ struct OrbitPageSnapshot {
 /// The floating, continuous orbit. Teaching belongs in settings, never in the selection layer.
 struct SessionWheelView: View {
     @ObservedObject var controller: CodexWorkflowController
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let ink = Color.white
     var body: some View {
@@ -98,7 +99,12 @@ struct SessionWheelView: View {
             if page.loading {
                 ProgressView().controlSize(.small)
             } else if page.items.isEmpty {
-                Text("暂无会话").font(.system(size: 20, weight: .medium))
+                Text(controller.activeTarget == .weChat ? "尚未添加常用会话" : "暂无会话").font(.system(size: 20, weight: .medium))
+                if controller.activeTarget == .weChat {
+                    Button("管理常用会话") {
+                        controller.dismissSelector(); openWindow(id: "session-management"); NSApp.activate(ignoringOtherApps: true)
+                    }.buttonStyle(.plain)
+                }
             } else {
                 Text(page.project).font(.system(size: 10, weight: .medium)).foregroundStyle(ink.opacity(0.55)).lineLimit(1)
                 Text(page.title)

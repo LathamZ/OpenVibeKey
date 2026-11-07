@@ -1,6 +1,6 @@
 # Desktop adapters
 
-The Vibekey supports the existing Codex integration and two desktop adapters: DeepSeek Harness and the **Code page of Claude.app**. Claude Code CLI/Herdr integration is outside this implementation. WeChat remains deferred.
+The Vibekey supports the existing Codex integration and two desktop adapters: DeepSeek Harness and the **Code page of Claude.app**. Claude Code CLI/Herdr integration is outside this implementation. WeChat has a local favorite selector/editor only; automatic chat opening and composer focus remain deferred. Favorites never pass through the DeepSeek/Claude Accessibility adapter.
 
 ## Use
 
@@ -26,3 +26,7 @@ Cached lists remain usable during detached background refresh. A user rotation p
 ## Verification
 
 Run the existing navigation and thread-list probes. The packaged app has an isolated `--desktop-adapter-check OUTPUT.json` mode; add `--claude` for Claude. It only reports permission status, counts and errors, exits before device initialization, and must be launched normally through LaunchServices to use its own established TCC identity. Do not infer VibeKey authorization from a helper run directly under another app's responsible identity.
+
+## WeChat local favorites
+
+WeChat selection can be opened independently of its unverified external capabilities. Add/remove explicit local names in session management. Empty selectors link to that editor; third-button cancellation uses the same owned-window path. Names and local UUIDs persist in `workflow.weChat.favorites.v1`; they are not authoritative WeChat recipient identities. Confirming one currently returns a clear unsupported-open error, keeps selection available, never reports accepted, and does not activate or control WeChat. Do not advertise this as a working recipient-opening adapter.

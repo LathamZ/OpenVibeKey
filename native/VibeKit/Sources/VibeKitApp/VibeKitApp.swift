@@ -17,6 +17,9 @@ struct VibeKitApp: App {
     @ObservedObject private var language = AppLanguage.shared
 
     init() {
+        if let i = CommandLine.arguments.firstIndex(of: "--workflow-entry-check"), i + 1 < CommandLine.arguments.count {
+            exit(runWorkflowEntryCheck(path: CommandLine.arguments[i + 1]))
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--voice-audio-lifecycle-check"), i + 1 < CommandLine.arguments.count {
             let meter = MicMeter()
             let before = !meter.captureAllocated && !meter.running
@@ -154,7 +157,7 @@ struct VibeKitApp: App {
         .windowResizability(.contentSize)
 
         Window("会话管理", id: "session-management") {
-            CodexNavigationSettings(vm: vm, controller: vm.codexWorkflow)
+            WorkflowSessionSettings(vm: vm, controller: vm.codexWorkflow)
         }
         .windowResizability(.contentSize)
     }

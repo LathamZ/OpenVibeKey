@@ -124,7 +124,7 @@ enum WorkflowMenuIcon {
     static func bodyImage(connected: Bool, darkAppearance: Bool = false) -> CGImage {
         raster(primary: bodyColor(darkAppearance: darkAppearance), secondary: .clear, connected: connected)
     }
-    static func pointScale(_ target: WorkflowTargetID) -> Double { target == .deepSeek ? 1.50 : 1.18 }
+    static func pointScale(_ target: WorkflowTargetID) -> Double { 1.50 }
     static func make(target: WorkflowTargetID, connected: Bool, darkAppearance: Bool = false) -> NSImage {
         let key = "\(target.rawValue)-\(connected)-\(darkAppearance)" as NSString
         if let image = cache.object(forKey: key) { return image }
@@ -172,6 +172,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
             let matches = (0..<3).allSatisfy { abs(Double(pixels[pixel * 4 + $0]) / alpha - expected[$0]) < 0.015 }
             if body { bodySamples += 1; bodyMatches = bodyMatches && matches } else { outerMatches = outerMatches && matches }
         }
+        check(WorkflowMenuIcon.pointScale(target) == WorkflowMenuIcon.pointScale(.deepSeek));
         check(!icon.isTemplate); check(alphaMatches); check(bodyMatches); check(outerMatches)
         check(WorkflowMenuIcon.points(connected: connected).count >= 6)
         check(bodySamples > 100)

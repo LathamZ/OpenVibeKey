@@ -7,7 +7,7 @@ public struct CodexSession: Codable, Equatable, Identifiable, Sendable {
     public let adapterTarget: WorkflowTargetID?
     public var target: WorkflowTargetID { adapterTarget ?? .codex }
     public init?(adapterReference: String, title: String, target: WorkflowTargetID) {
-        guard target == .deepSeek || target == .claudeCode, let id = UUID(uuidString: adapterReference), !title.isEmpty, title.count <= 4096 else { return nil }
+        guard target == .deepSeek || target == .claudeCode || target == .weChat, let id = UUID(uuidString: adapterReference), !title.isEmpty, title.count <= 4096 else { return nil }
         self.id = id.uuidString.lowercased(); self.title = title; self.adapterTarget = target
     }
     public init?(reference: String, title: String, maximumTitleLength: Int = 100) {
@@ -27,7 +27,7 @@ public struct CodexSession: Codable, Equatable, Identifiable, Sendable {
     }
     public var deepLink: URL { URL(string: "codex://threads/\(id)")! }
     public var isValid: Bool {
-        if target == .deepSeek || target == .claudeCode { return Self(adapterReference: id, title: title, target: target)?.id == id }
+        if target == .deepSeek || target == .claudeCode || target == .weChat { return Self(adapterReference: id, title: title, target: target)?.id == id }
         return target == .codex && Self(reference: id, title: title, maximumTitleLength: 4096)?.id == id
     }
 }
@@ -79,7 +79,7 @@ public struct CodexNavigation {
             return [.cycleApplication]
         case (.dial, .single):
             guard stage == .choosing else { return [.unavailable("输入聚焦尚未接入；长按旋钮选择会话。") ] }
-            guard let selected else { return [.unavailable("请先添加一条 Codex 会话。") ] }
+            guard let selected else { return [.unavailable("请先添加一条会话。") ] }
             stage = .opening; requestID = UUID(); return [.open(selected)]
         case (.exit, .single):
             if stage == .choosing { requestID = nil; stage = lastRequestedID == nil ? .idle : .openRequested; return [] }

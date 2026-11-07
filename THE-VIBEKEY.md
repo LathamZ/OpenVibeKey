@@ -2,7 +2,7 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 56)
+## 1.0.0-preview.5 (build 57)
 
 - The menu-bar dial follows macOS's native appearance with the user's explicit color mapping: black body in dark appearance, white body in light appearance. This corrects build52's mistaken foreground inversion. Native effective-appearance observation updates the actual menu label independently of the settings window's theme and SwiftUI MenuBarExtra environment. Perimeter dots retain the same target-App colors and sizes in both appearances; the whole icon is never made a monochrome template.
 
@@ -19,11 +19,12 @@ A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), li
 - Holding to the chosen duration opens the selector before release. Continued hold/repeat and the final release never confirm a conversation; timing changes during a press cancel that gesture until release.
 - The full-screen backdrop now adds a separate black scrim (default 50%, adjustable 0–80% in Device Settings) above the neutral system blur and below all glass/cards/text, improving white-text contrast on bright desktops. Blur intensity, background dimming and glass tint transparency remain independent. This supersedes build54’s undimmed background. Reduce Transparency uses the system opaque-material fallback. The selector covers the current display, not every connected display.
 
+- The menu-bar popover shows the live current target name and original App icon, with a checked target menu. It observes the shared workflow controller directly, so changing target refreshes an open popover.
 - Double rotary click preselects Codex → Claude → DeepSeek → WeChat (installed targets only). It changes the menu marker silently; it never launches or activates the target. Long rotary entry uses this selected target. Only confirming a conversation opens/activates its App.
-- Retains the original dial menu symbol and colors only its perimeter dots: Codex white, Claude orange, DeepSeek light sky blue (#82C9F5), WeChat green. DeepSeek dots are enlarged 50%, others 18%; selector halos retain the original App colors.
+- Retains the original dial menu symbol and colors only its perimeter dots: Codex white, Claude orange, DeepSeek light sky blue (#82C9F5), WeChat green. All four Apps use the same 50% dot enlargement; selector halos retain the original App colors.
 - Cached sessions stay interactive during background refresh and hardware preparation. Initial positioning and selected border/halo update immediately, without an initial trip around the orbit. Tracking uses 35ms transitions, settling starts after 120ms with a 220ms spring response; these are animation settings, not measured hardware-to-screen latency.
 - DeepSeek prefers its selected sidebar row; Claude Code prefers a unique matching current heading. Codex uses the most recently confirmed/opened conversation known to VibeKey: its official interface does not expose the desktop's active conversation after manual switching. Unknown identity falls back to a known request or the recent list.
-- A cold first fetch still waits for real sessions. Desktop lists require exposed sidebars. WeChat has preselection/green identification only, with no conversation adapter.
+- A cold first fetch still waits for real sessions. Desktop lists require exposed sidebars. WeChat has a local favorite selector and editor. Long rotary and workbench entry can open it, including an empty-state management link. Its entries are local names/UUIDs, not verified WeChat chat IDs. Automatic chat opening and focus remain unverified; confirmation fails explicitly without activating another App or acknowledging success.
 - Keeps the stable signing identity, bundle ID, permissions, glass/tint/sensitivity preferences and original-key recovery. Physical feel and recipient-Mac acceptance are separate checks.
 
 ## Earlier desktop adapter release (1.0.0-preview.4)
@@ -32,7 +33,7 @@ A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), li
 - In this earlier release, long rotary entry identified the foreground target (superseded by preview.5 target preselection). The workbench target menu/application cards allow an explicit choice, preserved even when the menu-bar app does not become the system's frontmost app.
 - Reuses the orbit, paging, cancel, physical editing arrows and Backspace/repeat. Browsing still depends on focus; physical-device acceptance for the two new targets remains separate.
 - Device settings provide a selector-preview button for live glass/tint adjustment.
-- Codex keeps its established official interfaces. WeChat is deferred; no CLI/Herdr bridge is shipped. No new stop/resume, new-chat or model-navigation bindings are introduced.
+- Codex keeps its established official interfaces. WeChat automatic chat opening/focus is deferred; no CLI/Herdr bridge is shipped. No new stop/resume, new-chat or model-navigation bindings are introduced.
 - Stable signing certificate, bundle identity, settings and hardware recovery journals are retained. See DESKTOP-ADAPTERS.md for exposed-sidebar and identity limits.
 
 ## 1.0.0-preview.3
