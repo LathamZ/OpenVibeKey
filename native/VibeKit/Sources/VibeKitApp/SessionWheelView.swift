@@ -19,6 +19,36 @@ struct SessionSelectorView: View {
     }
 }
 
+/// Value snapshot keeps the outgoing page intact during an interruptible crossfade.
+struct OrbitPageSnapshot {
+    let start: Int
+    let items: [CodexSession]
+    let selectedID: String?
+    let projects: [String: String]
+    let colors: [String: String]
+    let halo: String
+    let tint: Double
+    let position: Double
+    let title: String
+    let project: String
+    let loading: Bool
+    let error: String?
+    @MainActor init(_ controller: CodexWorkflowController) {
+        let range = controller.wheelRange
+        start = range.lowerBound; items = Array(controller.navigation.candidates[range])
+        selectedID = controller.navigation.selected?.id
+        projects = Dictionary(items.map { ($0.id, controller.project($0.id)) }, uniquingKeysWith: { a, _ in a })
+        colors = Dictionary(items.map { ($0.id, controller.colorHex($0.id)) }, uniquingKeysWith: { a, _ in a })
+        halo = controller.selectorHaloHex; tint = controller.wheelTintOpacity; position = controller.wheelPosition
+        title = controller.navigation.selected?.title ?? ""
+        project = controller.project(controller.navigation.selected?.id ?? "")
+        loading = controller.selectorLoading; error = controller.refreshError
+    }
+    @MainActor func isActive(_ controller: CodexWorkflowController) -> Bool {
+        controller.navigation.stage == .choosing && start == controller.wheelRange.lowerBound
+    }
+}
+
 /// The floating, continuous orbit. Teaching belongs in settings, never in the selection layer.
 struct SessionWheelView: View {
     @ObservedObject var controller: CodexWorkflowController
@@ -27,16 +57,21 @@ struct SessionWheelView: View {
     var body: some View {
         GeometryReader { geometry in
             let scale = min(geometry.size.width / 1000, geometry.size.height / 680)
+            let page = OrbitPageSnapshot(controller)
             ZStack {
                 ZStack {
                     OrbitGlassDisc(tint: Color(wheelHex: controller.selectorHaloHex),
                                    opacity: controller.wheelTintOpacity)
                         .frame(width: 650, height: 300)
                         .allowsHitTesting(false).position(x: 500, y: 325)
-                    centerInformation.position(x: 500, y: 325)
-                    OrbitCards(controller: controller, position: controller.wheelPosition)
-                        .id(controller.wheelRange.lowerBound)
-                        .animation(reduceMotion ? nil : controller.wheelSnapping ? .spring(response: 0.22, dampingFraction: 0.95) : .linear(duration: 0.035), value: controller.wheelPosition)
+                    ZStack {
+                        ZStack {
+                            centerInformation(page).position(x: 500, y: 325)
+                            OrbitCards(controller: controller, page: page, position: page.position)
+                                .animation(reduceMotion ? nil : controller.wheelSnapping ? .spring(response: 0.22, dampingFraction: 0.95) : .linear(duration: 0.035), value: controller.wheelPosition)
+                        }.id(page.start).transition(.opacity)
+                    }.frame(width: 1000, height: 680)
+                        .animation(reduceMotion || controller.wheelPageFadeDuration == 0 ? nil : .easeInOut(duration: controller.wheelPageFadeDuration), value: page.start)
                     if controller.wheelPageCount > 1 {
                         HStack(spacing: 16) {
                             Button { controller.turnWheelPage(-1) } label: { Image(systemName: "chevron.left") }
@@ -58,19 +93,19 @@ struct SessionWheelView: View {
             }
         }.background(Color.clear)
     }
-    private var centerInformation: some View {
+    private func centerInformation(_ page: OrbitPageSnapshot) -> some View {
         VStack(spacing: 11) {
-            if controller.selectorLoading {
+            if page.loading {
                 ProgressView().controlSize(.small)
-            } else if controller.navigation.candidates.isEmpty {
+            } else if page.items.isEmpty {
                 Text("暂无会话").font(.system(size: 20, weight: .medium))
             } else {
-                Text(controller.project(controller.navigation.selected?.id ?? "")).font(.system(size: 10, weight: .medium)).foregroundStyle(ink.opacity(0.55)).lineLimit(1)
-                Text(controller.navigation.selected?.title ?? "")
+                Text(page.project).font(.system(size: 10, weight: .medium)).foregroundStyle(ink.opacity(0.55)).lineLimit(1)
+                Text(page.title)
                     .font(.system(size: 22, weight: .regular, design: .rounded))
                     .lineLimit(3).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }
-            if let error = controller.refreshError {
+            if let error = page.error {
                 Text(error).font(.system(size: 11)).foregroundStyle(.white).lineLimit(3)
                 Button("重试") { controller.refreshSessions(replaceSelector: true) }.buttonStyle(.plain)
             }
@@ -106,27 +141,26 @@ private struct OrbitGlassDisc: View {
 /// Geometry is recalculated at every animated position, so cards follow a curve, not a chord.
 private struct OrbitCards: View, Animatable {
     @ObservedObject var controller: CodexWorkflowController
+    let page: OrbitPageSnapshot
     var position: Double
     var animatableData: Double { get { position } set { position = newValue } }
     var body: some View {
-        let range = controller.wheelRange
         ZStack {
-            ForEach(Array(range), id: \.self) { index in
-                let item = controller.navigation.candidates[index]
-                let pose = SessionOrbit.pose(index: index - range.lowerBound, position: position, count: range.count)
-                card(item, index: index)
+            ForEach(Array(page.items.enumerated()), id: \.element.id) { index, item in
+                let pose = SessionOrbit.pose(index: index, position: position, count: page.items.count)
+                card(item)
                     .scaleEffect(pose.scale).opacity(pose.opacity)
                     .position(x: pose.x, y: pose.y).zIndex(pose.depth * 100)
             }
         }.frame(width: 1000, height: 680)
     }
-    private func card(_ session: CodexSession, index: Int) -> some View {
-        let selected = controller.navigation.selection == index
+    private func card(_ session: CodexSession) -> some View {
+        let selected = page.selectedID == session.id
         return Button { controller.choose(session.id) } label: {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 7) {
-                    Circle().fill(Color(wheelHex: controller.colorHex(session.id))).frame(width: 6, height: 6)
-                    Text(controller.project(session.id)).font(.system(size: 9)).lineLimit(1)
+                    Circle().fill(Color(wheelHex: (page.colors[session.id] ?? "9196FF"))).frame(width: 6, height: 6)
+                    Text((page.projects[session.id] ?? "")).font(.system(size: 9)).lineLimit(1)
                 }.foregroundStyle(Color.white.opacity(0.76))
                 Text(session.title).font(.system(size: 13, weight: selected ? .semibold : .medium))
                     .shadow(color: .black.opacity(0.7), radius: 1.5, y: 1)
@@ -138,24 +172,25 @@ private struct OrbitCards: View, Animatable {
                     ZStack {
                         RoundedRectangle(cornerRadius: 15).fill(LinearGradient(colors: [.white.opacity(0.10), .white.opacity(0.025)], startPoint: .topLeading, endPoint: .bottomTrailing))
                         RoundedRectangle(cornerRadius: 15)
-                            .fill(Color(wheelHex: controller.selectorHaloHex).opacity(min(1, controller.wheelTintOpacity * (selected ? 1.4666667 : 0.7333333))))
+                            .fill(Color(wheelHex: page.halo).opacity(min(1, page.tint * (selected ? 1.4666667 : 0.7333333))))
                     }.clipShape(RoundedRectangle(cornerRadius: 15)).allowsHitTesting(false)
                 }
                 .overlay(RoundedRectangle(cornerRadius: 15)
                     .strokeBorder(selected ? Color.white.opacity(0.90) : Color.white.opacity(0.18), lineWidth: selected ? 1.35 : 0.6))
                 .background {
                     if selected {
-                        OrbitSelectionHalo(color: Color(wheelHex: controller.selectorHaloHex), width: 208, height: 86)
+                        OrbitSelectionHalo(color: Color(wheelHex: page.halo), width: 208, height: 86)
                             .allowsHitTesting(false)
                     }
                 }
                 .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
-        }.buttonStyle(.plain).animation(nil, value: selected).disabled(controller.selectorLoading)
+        }.buttonStyle(.plain).animation(nil, value: selected).disabled(controller.selectorLoading || !page.isActive(controller))
+            .accessibilityHidden(!page.isActive(controller))
             .help(session.title).accessibilityLabel(session.title).accessibilityValue(selected ? "已选中" : "未选中")
             .contextMenu {
                 ForEach(SessionColorLedger.palette, id: \.self) { hex in
                     Button { controller.setColor(id: session.id, hex: hex) } label: {
-                        Label((hex == controller.colorHex(session.id) ? "✓ " : "") + ["雾紫", "青绿", "暖橙", "玫瑰", "浅紫", "天蓝", "草绿", "琥珀"][SessionColorLedger.palette.firstIndex(of: hex) ?? 0], systemImage: "circle.fill")
+                        Label((hex == (page.colors[session.id] ?? "9196FF") ? "✓ " : "") + ["雾紫", "青绿", "暖橙", "玫瑰", "浅紫", "天蓝", "草绿", "琥珀"][SessionColorLedger.palette.firstIndex(of: hex) ?? 0], systemImage: "circle.fill")
                     }
                 }
             }
@@ -212,6 +247,15 @@ struct WheelSensitivitySettings: View {
                 Text("快").font(.caption).foregroundStyle(.secondary)
             }
             Text("每个会话间距对应 \(Int(controller.wheelStepsPerItem)) 格旋转；停下时吸附到最近一项。")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("翻页动画时长").font(.callout)
+                Slider(value: Binding(get: { controller.wheelPageFadeDuration }, set: { controller.setWheelPageFadeDuration($0) }), in: 0...0.8, step: 0.05)
+                    .accessibilityLabel("会话翻页淡入淡出时长")
+                Text(controller.wheelPageFadeDuration == 0 ? "关闭" : String(format: "%.2f 秒", controller.wheelPageFadeDuration))
+                    .font(.caption.monospacedDigit()).frame(width: 56)
+            }
+            Text("越短越快，越长越柔和；0 关闭。只过渡会话卡片与中间标题，背景和圆盘保持稳定，翻页后可立即转动选择。")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text("背景模糊强度").font(.callout)
@@ -316,6 +360,16 @@ func runWheelPersistenceCheck(outputPath: String) -> Int32 {
     checks["dimming_can_be_disabled"] = eighth.wheelDimming == 0
     eighth.setWheelDimming(1)
     checks["dimming_cannot_fully_obscure_background"] = eighth.wheelDimming == 0.8
+    checks["page_fade_defaults_to_fast"] = eighth.wheelPageFadeDuration == 0.2
+    eighth.setWheelPageFadeDuration(0.45)
+    let ninth = CodexWorkflowController(defaults: defaults)
+    checks["page_fade_survives_recreation"] = ninth.wheelPageFadeDuration == 0.45
+    ninth.setWheelPageFadeDuration(.nan)
+    checks["page_fade_invalid_uses_default"] = ninth.wheelPageFadeDuration == 0.2
+    ninth.setWheelPageFadeDuration(-1)
+    checks["page_fade_can_be_disabled"] = ninth.wheelPageFadeDuration == 0
+    ninth.setWheelPageFadeDuration(2)
+    checks["page_fade_has_bounded_duration"] = ninth.wheelPageFadeDuration == 0.8
     let passed = checks.values.allSatisfy { $0 }
     let result: [String: Any] = ["passed": passed, "checks": checks, "hardware_started": false, "target_app_control": false, "isolated_preferences": true]
     do { try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: outputPath)) }
@@ -397,6 +451,37 @@ func runSelectorBackdropCheck(controller: CodexWorkflowController, outputPath: S
                     print("SELECTOR_BACKDROP_CHECK=\(passed)"); fflush(stdout); exit(passed ? 0 : 1)
                 }
             }
+        }
+    }
+}
+
+/// Paging state changes immediately; fade is presentation only, with no delayed navigation work.
+@MainActor
+func runWheelPageFadeCheck(controller: CodexWorkflowController, outputPath: String) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        controller.setWheelPageFadeDuration(0.8)
+        let first = OrbitPageSnapshot(controller)
+        controller.turnWheelPage(1)
+        let next = OrbitPageSnapshot(controller)
+        var checks = [String: Bool]()
+        checks["page_changes_without_waiting_for_animation"] = controller.wheelPage == 1 && next.start == 8
+        checks["outgoing_snapshot_keeps_original_sessions"] = first.items.count == 8 && first.items.first?.id != next.items.first?.id && first.start == 0
+        checks["outgoing_page_cannot_receive_clicks"] = !first.isActive(controller) && next.isActive(controller)
+        controller.rotate(3)
+        checks["incoming_page_rotation_is_immediate"] = controller.navigation.selection == 9
+        for _ in 0..<30 { controller.turnWheelPage(1) }
+        checks["rapid_paging_does_not_queue_or_drop_steps"] = controller.wheelPage == 1
+        controller.dismissSelector()
+        checks["cancel_during_fade_hides_overlay"] = !controller.selectorIsVisible && controller.navigation.stage == .idle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            checks["no_delayed_fade_reopens_or_changes_navigation"] = !controller.selectorIsVisible && controller.navigation.stage == .idle
+            controller.enter(); controller.setWheelPageFadeDuration(0); controller.turnWheelPage(1)
+            checks["disabled_animation_preserves_navigation"] = controller.wheelPage == 1
+            controller.stop()
+            let data: [String: Any] = ["passed": checks.values.allSatisfy { $0 }, "checks": checks, "fixture_only": true, "hardware_started": false, "target_app_control": false]
+            do { try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: outputPath)) }
+            catch { exit(1) }
+            exit(checks.values.allSatisfy { $0 } ? 0 : 1)
         }
     }
 }

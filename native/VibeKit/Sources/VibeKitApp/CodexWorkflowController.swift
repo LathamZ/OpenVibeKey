@@ -111,6 +111,11 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         wheelTintOpacity = raw.isFinite ? min(1, max(0, raw)) : 0.075
         if !preview { defaults.set(wheelTintOpacity, forKey: "sessionOrbit.tintOpacity.v1") }
     }
+    @Published private(set) var wheelPageFadeDuration = 0.2
+    func setWheelPageFadeDuration(_ raw: Double) {
+        wheelPageFadeDuration = raw.isFinite ? min(0.8, max(0, raw)) : 0.2
+        if !preview { defaults.set(wheelPageFadeDuration, forKey: "sessionOrbit.pageFade.v1") }
+    }
     @Published private(set) var wheelDimming = 0.5
     func setWheelDimming(_ raw: Double) {
         wheelDimming = raw.isFinite ? min(0.8, max(0, raw)) : 0.5
@@ -271,6 +276,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 }
             }
         if !preview, let saved = defaults.object(forKey: wheelStepsKey) as? Double { wheelStepsPerItem = SessionWheelMotion.steps(saved) }
+        if !preview, let saved = defaults.object(forKey: "sessionOrbit.pageFade.v1") as? Double {
+            wheelPageFadeDuration = saved.isFinite ? min(0.8, max(0, saved)) : 0.2
+        }
         if !preview, let saved = defaults.object(forKey: "sessionOrbit.dim.v1") as? Double {
             wheelDimming = saved.isFinite ? min(0.8, max(0, saved)) : 0.5
         }
@@ -684,7 +692,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         }
         captureRotaryForNavigation()
         message = "已取消会话选择；原会话保持不变。"
-        if preview && !CommandLine.arguments.contains("--preview-backdrop-check") { NSApplication.shared.stop(nil) }
+        if preview && !CommandLine.arguments.contains("--preview-backdrop-check") && !CommandLine.arguments.contains("--preview-page-fade-check") { NSApplication.shared.stop(nil) }
     }
 }
 
@@ -777,6 +785,11 @@ func runCodexNavigationPreview() {
     if let i = CommandLine.arguments.firstIndex(of: "--preview-wheel-page"), i + 1 < CommandLine.arguments.count,
        let page = Int(CommandLine.arguments[i + 1]) { controller.turnWheelPage(page) }
     if CommandLine.arguments.contains("--preview-empty-wheel") { controller.selectorQuery = "no-fixture-matches"; controller.applySelectorQuery() }
+    if let i = CommandLine.arguments.firstIndex(of: "--preview-page-fade-seconds"), i + 1 < CommandLine.arguments.count,
+       let duration = Double(CommandLine.arguments[i + 1]) { controller.setWheelPageFadeDuration(duration) }
+    if let i = CommandLine.arguments.firstIndex(of: "--preview-page-fade-check"), i + 1 < CommandLine.arguments.count {
+        runWheelPageFadeCheck(controller: controller, outputPath: CommandLine.arguments[i + 1])
+    }
     if let i = CommandLine.arguments.firstIndex(of: "--preview-backdrop-check"), i + 1 < CommandLine.arguments.count {
         runSelectorBackdropCheck(controller: controller, outputPath: CommandLine.arguments[i + 1])
     }

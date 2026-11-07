@@ -2,7 +2,7 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 55)
+## 1.0.0-preview.5 (build 56)
 
 - The menu-bar dial follows macOS's native appearance with the user's explicit color mapping: black body in dark appearance, white body in light appearance. This corrects build52's mistaken foreground inversion. Native effective-appearance observation updates the actual menu label independently of the settings window's theme and SwiftUI MenuBarExtra environment. Perimeter dots retain the same target-App colors and sizes in both appearances; the whole icon is never made a monochrome template.
 
@@ -11,6 +11,7 @@ A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), li
 - The input-level meter creates its capture engine only for an explicit test and releases it on stop; idle settings no longer touch inputNode.
 
 - Repeated long holds while the selector is already open preserve its highlight, page, snapshot and gesture/capture ownership; an outstanding confirmed open also keeps its request ID.
+- Conversation pages crossfade their cards and central title while the background and glass disc stay still. Device Settings → 翻页动画时长 controls 0–0.80s (0.05s steps, default 0.20s; zero disables). Reduce Motion also disables the fade. Navigation updates immediately; outgoing immutable page snapshots cannot receive clicks, and there are no delayed page-change timers to survive cancellation.
 - Conversation selection now covers the current display with one neutral behind-window system material. Device Settings → 背景模糊强度 blends that material from 0% (off) to 100%; this is public compositor material intensity, not an arbitrary blur-radius API. The existing sessionOrbit.glass.v1 preference and current user value are retained.
 - The central 650×300 ellipse is an independent transparent glass disc with App-colored tint and subtle optical reflections. It and the cards add no second backdrop blur. The separate tint-transparency preference, white titles and orbit geometry remain. Closing, confirming, suspending or stopping hides the single owned overlay; display configuration changes resize it to its current screen. Clicking the surrounding background also cancels.
 
