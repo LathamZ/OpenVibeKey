@@ -1,33 +1,59 @@
 import AppKit
-import Combine
+import SwiftUI
 import ImageIO
 import VibeKitHost
 
-/// MenuBarExtra's SwiftUI environment can differ from the system appearance.
-/// Follow the native application instead of the settings window's theme.
+/// Keep the dial as a real template layer so SwiftUI/AppKit resolves its
+/// foreground for each menu-bar surface. The colored dots are a separate layer.
+struct NativeWorkflowMenuIcon: View {
+    let target: WorkflowTargetID
+    let connected: Bool
+    var body: some View {
+        ZStack {
+            Image(nsImage: WorkflowMenuIcon.bodyTemplate(connected: connected))
+                .renderingMode(.template)
+                .foregroundStyle(.primary)
+            Image(nsImage: WorkflowMenuIcon.dotImage(target: target, connected: connected))
+                .renderingMode(.original)
+        }.frame(width: 18, height: 18)
+            .background {
+                if CommandLine.arguments.contains("--menu-surface-preview") {
+                    MenuLabelAppearanceProbe().frame(width: 1, height: 1)
+                }
+            }
+    }
+}
+
+/// Diagnostic only: MenuBarExtra hosts its label offscreen for multiple appearances.
+/// This view does not color or draw the icon and is absent in normal operation.
+struct MenuLabelAppearanceProbe: NSViewRepresentable {
+    func makeNSView(context: Context) -> MenuLabelAppearanceView { MenuLabelAppearanceView() }
+    func updateNSView(_ view: MenuLabelAppearanceView, context: Context) { view.record() }
+}
 @MainActor
-final class MenuBarSystemAppearance: ObservableObject {
-    @Published private(set) var dark = false
-    private var observation: NSKeyValueObservation?
-    init() {
-        let application = NSApplication.shared
-        refresh()
-        observation = application.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
-            Task { @MainActor [weak self] in self?.refresh() }
-        }
-    }
-    private func refresh() {
-        let value = NSApplication.shared.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        if value != dark { dark = value }
-    }
-    func recordMenuLabel(swiftUIDark: Bool, target: WorkflowTargetID) {
-        let defaults = UserDefaults.standard
-        defaults.set(Int(ProcessInfo.processInfo.processIdentifier), forKey: "menuIcon.status.pid")
-        defaults.set(NSApp.effectiveAppearance.name.rawValue, forKey: "menuIcon.status.nativeAppearance")
-        defaults.set(swiftUIDark, forKey: "menuIcon.status.swiftUIDark")
-        defaults.set(dark, forKey: "menuIcon.status.systemDark")
-        defaults.set(dark ? "black body" : "white body", forKey: "menuIcon.status.body")
-        defaults.set(target.rawValue, forKey: "menuIcon.status.target")
+final class MenuLabelAppearanceView: NSView {
+    static var surfaces = Set<String>()
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); record() }
+    func record() { Self.surfaces.insert(effectiveAppearance.name.rawValue) }
+}
+
+/// An isolated real MenuBarExtra label run; no VibeVM, HID, audio or target App.
+@MainActor
+func beginMenuSurfacePreview(path: String) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+        let surfaces = MenuLabelAppearanceView.surfaces.sorted()
+        let light = surfaces.contains { $0.contains("Light") || $0 == NSAppearance.Name.aqua.rawValue }
+        let dark = surfaces.contains { $0.contains("Dark") }
+        let result: [String: Any] = ["passed": light && dark, "surfaces": surfaces,
+            "both_surface_variants_requested": light && dark,
+            "foreground_strategy": "system template layer plus original colored-dot layer",
+            "app_appearance": NSApp.effectiveAppearance.name.rawValue,
+            "system_setting_changed": false, "hardware_started": false,
+            "final_visible_variant_verified": false]
+        do { try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+            .write(to: URL(fileURLWithPath: path)) }
+        catch { exit(1) }
+        exit(light && dark ? 0 : 1)
     }
 }
 
@@ -116,30 +142,62 @@ enum WorkflowMenuIcon {
         }
         return result
     }
+    private static var templates: [Bool: NSImage] = [:]
+    static func bodyTemplate(connected: Bool) -> NSImage {
+        if let image = templates[connected] { return image }
+        let image = NSImage(cgImage: raster(primary: .white, secondary: .clear, connected: connected), size: NSSize(width: 18, height: 16))
+        image.isTemplate = true
+        templates[connected] = image
+        return image
+    }
+    static func dotImage(target: WorkflowTargetID, connected: Bool) -> NSImage {
+        let key = "dots-\(target.rawValue)-\(connected)" as NSString
+        if let image = cache.object(forKey: key) { return image }
+        let context = CGContext(data: nil, width: 72, height: 64, bitsPerComponent: 8, bytesPerRow: 72 * 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+        drawDots(target: target, connected: connected, context: context)
+        let image = NSImage(cgImage: context.makeImage()!, size: NSSize(width: 18, height: 16))
+        image.isTemplate = false
+        cache.setObject(image, forKey: key)
+        return image
+    }
+    private static func drawDots(target: WorkflowTargetID, connected: Bool, context: CGContext) {
+        let dots = raster(primary: .clear, secondary: color(target), connected: connected)
+        for (bounds, _) in points(connected: connected) {
+            let crop = bounds.insetBy(dx: -1, dy: -1).intersection(CGRect(x: 0, y: 0, width: 72, height: 64)).integral
+            guard let point = dots.cropping(to: crop) else { continue }
+            let grown = crop.insetBy(dx: -crop.width * ((pointScale(target) - 1) / 2), dy: -crop.height * ((pointScale(target) - 1) / 2))
+            context.draw(point, in: CGRect(x: grown.minX, y: 64 - grown.maxY, width: grown.width, height: grown.height))
+        }
+    }
+    static func bodyColor(appearance: NSAppearance) -> NSColor {
+        var resolved = NSColor.labelColor
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = NSColor.labelColor.usingColorSpace(.sRGB)!
+        }
+        return resolved
+    }
     static func bodyColor(darkAppearance: Bool) -> NSColor {
-        // Explicit product requirement: dark appearance has a dark body,
-        // light appearance has a light body. App-colored dots are independent.
-        (darkAppearance ? NSColor.black : .white).usingColorSpace(.sRGB)!
+        bodyColor(appearance: NSAppearance(named: darkAppearance ? .darkAqua : .aqua)!)
     }
     static func bodyImage(connected: Bool, darkAppearance: Bool = false) -> CGImage {
         raster(primary: bodyColor(darkAppearance: darkAppearance), secondary: .clear, connected: connected)
     }
     static func pointScale(_ target: WorkflowTargetID) -> Double { 1.50 }
     static func make(target: WorkflowTargetID, connected: Bool, darkAppearance: Bool = false) -> NSImage {
-        let key = "\(target.rawValue)-\(connected)-\(darkAppearance)" as NSString
+        make(target: target, connected: connected, appearance: NSAppearance(named: darkAppearance ? .darkAqua : .aqua)!)
+    }
+    static func make(target: WorkflowTargetID, connected: Bool, appearance: NSAppearance) -> NSImage {
+        let foreground = bodyColor(appearance: appearance)
+        let key = "\(target.rawValue)-\(connected)-\(appearance.name.rawValue)-\(foreground.redComponent)-\(foreground.greenComponent)-\(foreground.blueComponent)-\(foreground.alphaComponent)" as NSString
         if let image = cache.object(forKey: key) { return image }
         // Only the dial follows appearance; the perimeter keeps the target App's color.
         let context = CGContext(data: nil, width: 72, height: 64, bitsPerComponent: 8, bytesPerRow: 72 * 4,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
-        context.draw(bodyImage(connected: connected, darkAppearance: darkAppearance), in: CGRect(x:0,y:0,width:72,height:64))
-        let dots = raster(primary: .clear, secondary: color(target), connected: connected)
-        for (bounds, _) in points(connected: connected) {
-            let crop = bounds.insetBy(dx:-1,dy:-1).intersection(CGRect(x:0,y:0,width:72,height:64)).integral
-            guard let point = dots.cropping(to: crop) else { continue }
-            let grown = crop.insetBy(dx: -crop.width * ((pointScale(target) - 1) / 2), dy: -crop.height * ((pointScale(target) - 1) / 2))
-            context.draw(point, in: CGRect(x:grown.minX,y:64-grown.maxY,width:grown.width,height:grown.height))
-        }
+        context.draw(raster(primary: foreground, secondary: .clear, connected: connected), in: CGRect(x:0,y:0,width:72,height:64))
+        drawDots(target: target, connected: connected, context: context)
         let cg = context.makeImage()!
         let image = NSImage(cgImage: cg, size: NSSize(width: 18, height: 16))
         image.isTemplate = false
@@ -188,20 +246,50 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
             }
         }
     }}}
-    // Change only this isolated check process, never the system setting.
+    // Render the exact SwiftUI label while the global App theme is opposite.
+    // The template foreground must resolve through the local label environment.
     let application = NSApplication.shared
     let savedAppearance = application.appearance
-    let observer = MenuBarSystemAppearance()
-    for dark in [false, true, false, true] {
-        application.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        check(observer.dark == dark)
-        let color = WorkflowMenuIcon.bodyColor(darkAppearance: observer.dark)
-        check(dark ? color.redComponent < 0.2 : color.redComponent > 0.8)
-    }
+    var surfaceResults: [[String: Any]] = []
+    for dark in [false, true] { for target in WorkflowAppCycle.order {
+        application.appearance = NSAppearance(named: dark ? .aqua : .darkAqua)
+        let renderer = ImageRenderer(content: NativeWorkflowMenuIcon(target: target, connected: true)
+            .environment(\.colorScheme, dark ? .dark : .light))
+        renderer.scale = 4
+        guard let cg = renderer.cgImage else { check(false); continue }
+        let ctx = CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        let bytes = ctx.data!.assumingMemoryBound(to: UInt8.self)
+        let body = WorkflowMenuIcon.bodyTemplate(connected: true).cgImage(forProposedRect: nil, context: nil, hints: nil)!
+        let bodyData = [UInt8](body.dataProvider!.data! as Data)
+        var samples = 0, match = true
+        // Label is 18x18; the 18x16 glyph has a one-point vertical inset.
+        for y in 0..<64 { for x in 0..<72 where bodyData[(y * 72 + x) * 4 + 3] > 220 {
+            let pixel = ((y + 4) * cg.width + x) * 4
+            guard bytes[pixel + 3] > 150 else { continue }
+            let brightness = Double(bytes[pixel]) / Double(bytes[pixel + 3])
+            match = match && (dark ? brightness > 0.7 : brightness < 0.3); samples += 1
+        }}
+        check(samples > 100); check(match)
+        check(WorkflowMenuIcon.bodyTemplate(connected: true).isTemplate)
+        check(!WorkflowMenuIcon.dotImage(target: target, connected: true).isTemplate)
+        // The dot bitmap is shared across both appearances, with no theme tint.
+        check(WorkflowMenuIcon.dotImage(target: target, connected: true) === WorkflowMenuIcon.dotImage(target: target, connected: true))
+        surfaceResults.append(["darkSurface": dark, "target": target.rawValue, "appOpposite": true,
+                               "bodyPixelSamples": samples, "systemForegroundMatches": match])
+        if target == .deepSeek {
+            let url = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("label-\(dark ? "dark" : "light").png")
+            if let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) {
+                CGImageDestinationAddImage(dest, cg, nil); CGImageDestinationFinalize(dest)
+            }
+        }
+    }}
     application.appearance = savedAppearance
     let report: [String: Any] = ["checks": checks, "failures": failures, "targets": results,
-                               "native_application_appearance_roundtrip": true,
+                               "native_surface_appearance_checks": surfaceResults,
+                               "foreground_source": "system template foreground in local label environment; independent colored dots",
                                "system_setting_changed": false, "hardware_or_target_UI_access": false]
     do { try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path)) }
     catch { return 1 }

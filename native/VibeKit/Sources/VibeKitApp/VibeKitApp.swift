@@ -17,6 +17,10 @@ struct VibeKitApp: App {
     @ObservedObject private var language = AppLanguage.shared
 
     init() {
+        if let i = CommandLine.arguments.firstIndex(of: "--menu-surface-preview"), i + 1 < CommandLine.arguments.count {
+            beginMenuSurfacePreview(path: CommandLine.arguments[i + 1])
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--workflow-entry-check"), i + 1 < CommandLine.arguments.count {
             exit(runWorkflowEntryCheck(path: CommandLine.arguments[i + 1]))
         }
@@ -139,11 +143,19 @@ struct VibeKitApp: App {
             // 注意：这里不挂启动自动连接。MenuBarExtra 的 content 是懒加载的——只有 label 图标
             // 随 App 启动就渲染，content（本视图）要等用户第一次点开顶栏图标才会被构建，挂在
             // 这里的 .task 不会在启动时触发。启动自动连接见 VibeVM.init()。
-            MiniPanel()
-                .environmentObject(vm)
-                .environment(\.locale, language.locale)
+            if CommandLine.arguments.contains("--menu-surface-preview") {
+                Text("Menu surface appearance check")
+            } else {
+                MiniPanel()
+                    .environmentObject(vm)
+                    .environment(\.locale, language.locale)
+            }
         } label: {
-            PermissionMenuIcon(connected: vm.connected, controller: vm.codexWorkflow)
+            if CommandLine.arguments.contains("--menu-surface-preview") {
+                NativeWorkflowMenuIcon(target: .deepSeek, connected: true).frame(width: 18, height: 18)
+            } else {
+                PermissionMenuIcon(connected: vm.connected, controller: vm.codexWorkflow)
+            }
         }
         .menuBarExtraStyle(.window)     // 面板式，不是下拉菜单
 
@@ -169,17 +181,12 @@ private struct PermissionMenuIcon: View {
     @ObservedObject var controller: CodexWorkflowController
     @ObservedObject private var permissions = PermissionCenter.shared
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var systemAppearance = MenuBarSystemAppearance()
     var body: some View {
-        Image(nsImage: WorkflowMenuIcon.make(target: controller.activeTarget, connected: connected,
-                                             darkAppearance: systemAppearance.dark))
-            .renderingMode(.original).frame(width: 18, height: 18)
-            .id("\(controller.activeTarget.rawValue)-\(connected)-\(systemAppearance.dark)")
+        NativeWorkflowMenuIcon(target: controller.activeTarget, connected: connected)
+            .frame(width: 18, height: 18)
             .accessibilityLabel("The Vibekey · " + WorkflowCatalog.target(controller.activeTarget).name)
             .help(L(permissions.allGranted ? "权限已全部授予" : "权限待完善"))
             .onAppear {
-                systemAppearance.recordMenuLabel(swiftUIDark: colorScheme == .dark, target: controller.activeTarget)
                 openMainIfRequested()
             }
             .onChange(of: permissions.shouldOpenMain) { _ in openMainIfRequested() }
