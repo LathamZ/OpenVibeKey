@@ -67,6 +67,8 @@ final class HoldToTalkController {
         if let tokens = configuration() { monitor.start(tokens: tokens) }
         else { monitor.stop(); monitorStatus = "等待 VibeKey 按钮配置。"; publish() }
     }
+    /// Existing monitor stays attached; no 200ms poll is needed after a verified key restoration.
+    func refreshEligibility() { if !eligible() { cancel() } }
     func cancel() { monitor.cancel(); input.setOpen(false) }
     func shutdown() {
         timer?.invalidate(); timer = nil; monitor.stop(); input.end(restoreOriginal: false)

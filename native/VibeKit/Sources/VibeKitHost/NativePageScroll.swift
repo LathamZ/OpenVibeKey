@@ -21,6 +21,7 @@ public enum NativePageScroll {
         return slot.programmedTokens
     }
     public static func apply(slots: [NavigationCaptureJournal.Slot], mode: Mode,
+                             previousMode: Mode? = nil, voiceKeyRestored: (() -> Void)? = nil,
                              restoreOriginal: ((NavigationCaptureJournal.Slot) -> Bool)? = nil,
                              writeAndVerify: (NavigationCaptureJournal.Slot, [String]) -> Bool) -> Bool {
         let directions = slots.filter { $0.id == "dialL" || $0.id == "dialR" }
@@ -29,10 +30,17 @@ public enum NativePageScroll {
         let bottom = slots.filter { $0.id == "btn3" && $0.nativeBackspace == true }
         let paging = slots.filter { $0.selectorPaging == true }
         guard paging.isEmpty || (paging.count == 2 && Set(paging.map(\.id)) == Set(["btn1", "btn2"])) else { return false }
-        let targets = directions + bottom + paging
+        // Restore real voice/submit keys before rotary and Backspace writes.
+        let targets = paging.sorted { $0.id < $1.id } + directions + bottom
         guard bottom.count <= 1, Set(targets.map(\.index)).count == targets.count,
               targets.allSatisfy({ $0.index < 10 }) else { return false }
         for slot in targets {
+            // A known verified route needs no rewrite of unchanged physical keys.
+            if let previousMode, (slot.selectorPaging != true || (previousMode == .selection) == (mode == .selection)),
+               tokens(slot: slot, mode: previousMode) == tokens(slot: slot, mode: mode) {
+                if slot.id == "btn1", mode != .selection { voiceKeyRestored?() }
+                continue
+            }
             let ok = slot.selectorPaging == true && mode != .selection
                 ? (restoreOriginal?(slot) ?? false) : writeAndVerify(slot, tokens(slot: slot, mode: mode))
             if !ok {
@@ -43,6 +51,7 @@ public enum NativePageScroll {
                 }
                 return false
             }
+            if slot.id == "btn1", mode != .selection { voiceKeyRestored?() }
         }
         return true
     }

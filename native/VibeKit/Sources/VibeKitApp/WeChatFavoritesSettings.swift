@@ -69,7 +69,7 @@ func runWorkflowEntryCheck(path: String) -> Int32 {
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
     defaults.set(WorkflowTargetID.weChat.rawValue, forKey: "workflow.activeTarget.v1")
-    let controller = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil)
+    let controller = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil, externalOpenAllowed: false)
     var checks: [String: Bool] = [:]
     checks["wechat_selector_independent_of_unverified_desktop_capability"] = controller.canPresentSelector && !WorkflowCatalog.supports(.openConversation, in: .weChat)
     checks["new_favorites_empty"] = controller.weChatFavorites.isEmpty
@@ -79,7 +79,7 @@ func runWorkflowEntryCheck(path: String) -> Int32 {
     checks["duplicate_rejected"] = !controller.addWeChatFavorite(title: "Fixture One")
     checks["second_favorite_added"] = controller.addWeChatFavorite(title: "Fixture Two")
     let ids = controller.weChatFavorites.map(\.id)
-    let restored = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil)
+    let restored = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil, externalOpenAllowed: false)
     checks["favorites_persist_with_stable_local_ids"] = restored.weChatFavorites.map(\.id) == ids && restored.weChatFavorites.map(\.title) == ["Fixture One", "Fixture Two"]
     checks["favorites_are_wechat_only"] = restored.sessions.allSatisfy { $0.target == .weChat && $0.isValid }
     controller.ready = true
@@ -94,7 +94,7 @@ func runWorkflowEntryCheck(path: String) -> Int32 {
     controller.gesture(.single, control: .exit)
     checks["third_button_cancels_wechat_selector"] = !controller.selectorIsVisible && controller.navigation.stage != .choosing
     controller.removeWeChatFavorite(ids[0])
-    checks["remove_persists"] = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil).weChatFavorites.map(\.id) == [ids[1]]
+    checks["remove_persists"] = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil, externalOpenAllowed: false).weChatFavorites.map(\.id) == [ids[1]]
     controller.selectTarget(.codex)
     checks["wechat_favorites_never_enter_codex_list"] = !controller.sessions.contains { $0.target == .weChat }
     controller.selectTarget(.weChat)
@@ -105,7 +105,7 @@ func runWorkflowEntryCheck(path: String) -> Int32 {
     try! Data("{}".utf8).write(to: fakeConfig)
     defer { try? FileManager.default.removeItem(at: fakeConfig) }
     defaults.set(WorkflowTargetID.weChat.rawValue, forKey: "workflow.activeTarget.v1")
-    let loading = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: fakeConfig)
+    let loading = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: fakeConfig, externalOpenAllowed: false)
     loading.refreshSessions()
     loading.suspend(message: "", preserveRefresh: true)
     checks["window_switch_keeps_background_refresh"] = loading.refreshing

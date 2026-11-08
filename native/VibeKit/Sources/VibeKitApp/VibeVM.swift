@@ -259,6 +259,7 @@ final class VibeVM: ObservableObject {
     private var navigationTimer: Timer?
     private let physicalRotaryMonitor = PhysicalRotaryMonitor()
     private let holdToTalk = HoldToTalkController()
+    private var voiceKeyRouteReady = true
     @Published private(set) var holdToTalkEnabled = UserDefaults.standard.object(forKey: HoldToTalkController.preferenceKey) as? Bool ?? true
     @Published private(set) var voiceHoldStatus = "正在准备按住说话…"
     @Published private(set) var voiceHoldReady = false
@@ -282,7 +283,7 @@ final class VibeVM: ObservableObject {
         holdToTalk.eligible = { [weak self] in
             guard let self else { return false }
             return self.connected && self.slotsHydrated && !self.applyingProfile && !self.quitting &&
-                !self.codexWorkflow.busy && !self.codexWorkflow.pageRoutingBusy &&
+                !self.codexWorkflow.busy && !self.codexWorkflow.hasRecovery && self.voiceKeyRouteReady &&
                 self.codexWorkflow.navigation.stage != .choosing && self.codexWorkflow.navigation.stage != .opening
         }
         holdToTalk.onStatus = { [weak self] text, ready, open in
@@ -819,6 +820,18 @@ final class VibeVM: ObservableObject {
         }
         codexWorkflow.cancelPendingGestures = { [weak self] in self?.cancelNavigationGestures() }
         codexWorkflow.routePhysicalFocus = { [weak self] wanted in self?.syncPhysicalFocusRoute(wanted) ?? false }
+        codexWorkflow.prepareVoiceKeyForConfirmedOpen = { [weak self] in
+            guard let self else { throw DesktopAccessibilityAdapter.Failure("设备连接已变化。") }
+            for _ in 0..<100 {
+                try Task.checkCancellation()
+                guard self.connected, !self.quitting, !self.codexWorkflow.hasRecovery else {
+                    throw DesktopAccessibilityAdapter.Failure("设备键位尚未恢复，未切换应用。")
+                }
+                if self.voiceKeyRouteReady { return }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            throw DesktopAccessibilityAdapter.Failure("语音键恢复超时，请重新选择会话。")
+        }
         physicalRotaryMonitor.eligible = { [weak self] in
             guard let self else { return false }
             return self.codexWorkflow.nativeFocusActive && self.codexWorkflow.ready &&
@@ -2234,6 +2247,7 @@ extension VibeVM {
 extension VibeVM {
     private func cancelNativePageRouting() {
         nativePageRoute.reset(); codexWorkflow.pageRoutingBusy = false
+        voiceKeyRouteReady = true; holdToTalk.refreshEligibility()
         codexWorkflow.nativePageStatus = "选择层保持旋钮导航键位。"
     }
     private func syncNativePageRoute(_ wantedContent: Bool) {
@@ -2247,6 +2261,10 @@ extension VibeVM {
         if let operation = nativePageRoute.request(mode) { startNativePageRouting(operation) }
     }
     private func startNativePageRouting(_ operation: NativePageRouteState.Operation) {
+        if operation.mode == .selection { voiceKeyRouteReady = false; holdToTalk.cancel() }
+        defaults.set(operation.id.uuidString, forKey: "voiceHold.route.operation")
+        defaults.set(0, forKey: "voiceHold.route.keyReadyUptime")
+        defaults.set(0, forKey: "voiceHold.route.completedUptime")
         codexWorkflow.pageRoutingBusy = true
         codexWorkflow.nativePageStatus = "正在核对旋钮\(operation.mode == .pages ? "翻页" : operation.mode == .arrows ? "左右移动" : "选择")键位，请稍候…"
         writeNativePageMode(operation.mode) { [weak self] ok in
@@ -2254,6 +2272,7 @@ extension VibeVM {
             let next = self.nativePageRoute.complete(operation, succeeded: ok)
             if !ok {
                 self.codexWorkflow.pageRoutingBusy = false
+                self.voiceKeyRouteReady = false; self.holdToTalk.cancel()
                 self.codexWorkflow.ready = false; self.codexWorkflow.hasRecovery = true
                 self.codexWorkflow.nativePageStatus = "旋钮键位核对失败，恢复记录已保留。请关闭导航并恢复原键位。"
                 self.codexWorkflow.message = self.codexWorkflow.nativePageStatus
@@ -2262,6 +2281,7 @@ extension VibeVM {
             }
             if let next { self.startNativePageRouting(next); return }
             self.codexWorkflow.pageRoutingBusy = false
+            self.defaults.set(ProcessInfo.processInfo.systemUptime, forKey: "voiceHold.route.completedUptime")
             self.codexWorkflow.nativePageStatus = operation.mode == .pages
                 ? "真实硬件翻页已就绪：左转 PageUp，右转 PageDown。"
                 : operation.mode == .selection ? "列表键位已就绪：转动选择；底部键按下并松开关闭列表。"
@@ -2277,8 +2297,20 @@ extension VibeVM {
             completion(false); return
         }
         let generation = navigationOperation
+        let previousMode = nativePageRoute.operation == nil ? nil : nativePageRoute.applied
+        let operation = nativePageRoute.operation
         io.async {
             let ok = device.getSN() == journal.deviceSerial && NativePageScroll.apply(slots: journal.slots, mode: mode,
+                previousMode: previousMode,
+                voiceKeyRestored: { [weak self] in
+                    DispatchQueue.main.async {
+                        guard let self, self.navigationOperation == generation, self.nativePageRoute.operation == operation,
+                              self.nativePageRoute.desired != .selection else { return }
+                        self.voiceKeyRouteReady = true
+                        self.defaults.set(ProcessInfo.processInfo.systemUptime, forKey: "voiceHold.route.keyReadyUptime")
+                        self.holdToTalk.refreshEligibility()
+                    }
+                },
                 restoreOriginal: { Self.restoreNavigationSlot($0, device: device) },
                 writeAndVerify: { slot, tokens in
                     (try? Self.writeDial(DialRestore(index: slot.index, tokens: tokens), to: device)) == true

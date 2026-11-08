@@ -1,6 +1,6 @@
 # Desktop adapters
 
-The Vibekey supports the existing Codex integration and two desktop adapters: DeepSeek Harness and the **Code page of Claude.app**. Claude Code CLI/Herdr integration is outside this implementation. WeChat has a local favorite selector/editor only; automatic chat opening and composer focus remain deferred. Favorites never pass through the DeepSeek/Claude Accessibility adapter.
+The Vibekey supports the existing Codex integration and two desktop adapters: DeepSeek Harness and the **Code page of Claude.app**. Claude Code CLI/Herdr integration is outside this implementation. WeChat lists recent conversations from a separately configured local metadata source, with a manual-favorite fallback. Confirmation restores its main window, but exact recipient selection and composer focus remain unsupported. WeChat entries never pass through the DeepSeek/Claude Accessibility adapter.
 
 ## Use
 
@@ -29,7 +29,7 @@ Run the existing navigation and thread-list probes. The packaged app has an isol
 
 ## WeChat local favorites
 
-WeChat selection can be opened independently of its unverified external capabilities. Add/remove explicit local names in session management. Empty selectors link to that editor; third-button cancellation uses the same owned-window path. Names and local UUIDs persist in `workflow.weChat.favorites.v1`; they are not authoritative WeChat recipient identities. Confirming one currently returns a clear unsupported-open error, keeps selection available, never reports accepted, and does not activate or control WeChat. Do not advertise this as a working recipient-opening adapter.
+WeChat selection can be opened independently of its unverified external capabilities. Add/remove explicit local names in session management. Empty selectors link to that editor; third-button cancellation uses the same owned-window path. Names and local UUIDs persist in `workflow.weChat.favorites.v1`; they are not authoritative WeChat recipient identities. Confirming one restores the main window and hides the selector, then explicitly requests manual chat selection. It never reports recipient acceptance or records the requested chat as opened. Do not advertise this as a working recipient-opening adapter.
 
 ## WeChat recent-50 source (build63)
 
@@ -40,3 +40,11 @@ On a configured Mac, the selector uses at most 50 nonhidden SessionTable entries
 The pure backend helper is `scripts/wechat_session_projection.py`; run its portable fixtures with `python3 scripts/test_wechat_session_projection.py`. An authorized local backend can call it with metadata rows containing username, nick_name, last_timestamp and is_hidden. It must independently verify its native account root, write the projection atomically with mode0600, and leave unrelated reader/monitor behavior unchanged. Local config at `~/.config/the-vibekey/wechat-source.json` has endpoint, tokenFile, feedFile and accountScope. The endpoint must be literal127.0.0.1 `/api/v1/sessions`; the app never contacts a remote reader. This dependency is not auto-installed on recipient Macs.
 
 `--wechat-recent-check OUTPUT.json` runs isolated validation fixtures; `--verify-local-source` additionally checks the configured source and reports aggregate count only. No target App activation, body/draft read, send or mark-read occurs. Without configuration the previous explicit local-favorite editor remains available. Actual WeChat recipient opening/focus is still unsupported; do not advertise this listing improvement as full chat-switching integration.
+
+## Confirmed-open and voice readiness (build64)
+
+Preselection and listing still never launch/activate targets. Only a confirmed open uses `ConfirmedApplicationOpen`, including an already-running hidden/minimized destination. A source-window activation caused by hiding the overlay is ignored until the destination activates; a later external switch cancels the pending operation. DeepSeek/Claude re-fetch fresh AX handles on an isolated task, refuse ambiguous duplicate titles, try supported row actions/standard outline selection and verify the selected row/heading before acknowledgement. Composer search matches accessibility hints, never draft Value, uses a bounded deeper tree, and retries actual readiness instead of sleeping a fixed350ms. Codex's established official path is retained; it is not routed through desktop AX.
+
+WeChat currently restores only its main window on confirmation. Exact chat selection/focus remains unsupported on this Mac; no recordOpened or successful recipient acknowledgement is produced. A short error notice asks for manual chat selection. The50-item read-only source remains unchanged. Do not advertise main-window activation as recipient localization.
+
+Hardware mode transitions restore button1 before other keys, report its successful original-bank readback independently, and skip keys unchanged from the previous verified mode. Voice eligibility uses that readiness instead of the entire pageRoutingBusy flag. Desktop confirmed opens await only that milestone (bounded and cancellable) before foreground activation, rather than exposing the destination with button1 still mapped to paging. Context, held-key, disconnection, write-failure and recovery barriers remain. `voiceHold.route.keyReadyUptime` and `.completedUptime` are process-local timing diagnostics, not speech-recognition latency measurements. Explicit hardware checks with no coordinator operation still verify all slots.

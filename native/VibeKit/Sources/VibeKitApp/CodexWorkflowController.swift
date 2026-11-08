@@ -22,6 +22,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private let claudeAdapter = DesktopAccessibilityAdapter(target: .claudeCode)
     @Published private(set) var activeTarget: WorkflowTargetID = .codex
     @Published private(set) var weChatFavorites: [CodexSession] = []
+    private let externalOpenAllowed: Bool
     private let weChatSourceConfigURL: URL?
     private var weChatListTask: Task<WeChatRecentListing, Error>?
     @Published private(set) var weChatRecentSessions: [CodexSession] = []
@@ -92,6 +93,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     @Published var listStatus = "打开选择面板时会自动读取本机未归档会话。"
     private var refreshGeneration = UUID()
     private var listTask: Task<CodexThreadListing, Error>?
+    var prepareVoiceKeyForConfirmedOpen: (() async throws -> Void)?
+    private var openingTargetActivated = false
+    private var confirmedOpenTask: Task<Void, Never>?
     private var desktopListTask: Task<DesktopAccessibilityAdapter.Listing, Error>?
     private var selectorInteracted = false
     private var currentSessionIDs: [String: String] = [:]
@@ -262,7 +266,8 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         return nativeFocusConfigured ? nativeFocusMainKey : nil
     }
 
-    init(defaults: UserDefaults = .standard, preview: Bool = false, weChatSourceConfigURL: URL? = WeChatRecentSource.defaultConfigURL) {
+    init(defaults: UserDefaults = .standard, preview: Bool = false, weChatSourceConfigURL: URL? = WeChatRecentSource.defaultConfigURL, externalOpenAllowed: Bool = true) {
+        self.externalOpenAllowed = externalOpenAllowed
         self.weChatSourceConfigURL = weChatSourceConfigURL
         self.defaults = defaults; self.preview = preview
         if !preview, let saved = defaults.object(forKey: RotaryHoldTiming.preferenceKey) as? Double {
@@ -320,12 +325,16 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                     self.cancelPhysicalRotaryGesture?()
                     if self.switchingApplication { return }
                     if app.bundleIdentifier == self.contentBundleID {
+                        if self.navigation.stage == .opening { self.openingTargetActivated = true }
                         self.refreshPhysicalFocusRoute(); return
                     }
                     if app.processIdentifier == ProcessInfo.processInfo.processIdentifier {
                         self.nativeFocusActive = self.routePhysicalFocus?(false) ?? false
                         return
                     }
+                    // Closing our panel can briefly restore the source App before the
+                    // confirmed destination activates. That transient is not cancellation.
+                    if self.navigation.stage == .opening, !self.openingTargetActivated { return }
                     if self.navigation.stage == .openRequested {
                         // Preserve the selected Codex context across app switches. Only hardware mapping changes.
                         self.refreshPhysicalFocusRoute()
@@ -606,11 +615,13 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         } else { resetWheelMotion() }
     }
     func suspend(message: String, preserveRefresh: Bool = false) {
+        confirmedOpenTask?.cancel(); confirmedOpenTask = nil
         wheelSettleTask?.cancel(); wheelSettleTask = nil
         selectorGeneration = UUID()
         navigation.suspend(); captureRotaryForNavigation(); if !preserveRefresh { cancelRefresh() }; cancelPendingGestures?(); panel?.orderOut(nil); self.message = message
     }
     func stop() {
+        confirmedOpenTask?.cancel(); confirmedOpenTask = nil
         wheelSettleTask?.cancel(); wheelSettleTask = nil
         selectorGeneration = UUID()
         ready = false; captureRotaryForNavigation(); cancelRefresh(); cancelPendingGestures?(); navigation.reset(); panel?.orderOut(nil); notice?.orderOut(nil)
@@ -630,56 +641,54 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
     private func open(_ session: CodexSession) {
         guard let request = navigation.requestID else { return }
+        openingTargetActivated = false
         if preview {
             navigation.dispatched(request: request, session: session, accepted: true)
             message = "预览：已模拟打开请求，没有启动或控制 Codex。"; return
         }
-        if activeTarget == .weChat {
-            // Local favorite selection is not evidence that WeChat accepted a chat open.
-            navigation.dispatched(request: request, session: session, accepted: false)
-            refreshError = "微信自动打开尚未验证；未切换聊天。"
-            message = refreshError ?? ""; present(); return
-        }
         if activeTarget != .codex {
-            let target = activeTarget
-            let adapter = target == .deepSeek ? deepSeekAdapter : claudeAdapter
-            if NSRunningApplication.runningApplications(withBundleIdentifier: contentBundleID).isEmpty {
-                guard let url = applicationURL(target) else {
-                    navigation.dispatched(request: request, session: session, accepted: false); return
-                }
-                let config = NSWorkspace.OpenConfiguration(); config.activates = true
-                NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] _, error in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.navigation.requestID == request, self.activeTarget == target else { return }
-                        if let error { self.desktopOpenFailed(request: request, session: session, error: error); return }
-                        for _ in 0..<15 {
-                            let result = await Task.detached(priority: .userInitiated) { try DesktopAccessibilityAdapter.fetch(target: target) }.result
-                            guard self.navigation.requestID == request, self.activeTarget == target else { return }
-                            if case .success(let listing) = result, listing.sessions.contains(where: { $0.id == session.id }) {
-                                adapter.adopt(listing); self.adapterSessions = listing.sessions
-                                self.open(session); return
-                            }
-                            try? await Task.sleep(nanoseconds: 200_000_000)
-                        }
-                        self.desktopOpenFailed(request: request, session: session, error: DesktopAccessibilityAdapter.Failure("应用已打开，但尚未确认原会话，请刷新后重选。"))
-                    }
-                }
-                return
-            }
-            do {
-                try adapter.open(session)
-                navigation.dispatched(request: request, session: session, accepted: true)
-                recordOpened(session)
-                rotaryEditing = true; refreshPhysicalFocusRoute()
-                // Electron renders the newly selected composer asynchronously; never write text.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-                    guard let self, self.activeTarget == target, self.navigation.lastRequestedID == session.id, self.navigation.stage == .openRequested else { return }
-                    do { try adapter.focusComposer(); self.message = "输入框已聚焦。" }
-                    catch { self.message = error.localizedDescription }
-                }
-            } catch {
+            guard externalOpenAllowed else {
                 navigation.dispatched(request: request, session: session, accepted: false)
-                message = error.localizedDescription; refreshError = message; present()
+                refreshError = "隔离测试：未操控目标应用。"; return
+            }
+            guard session.target == activeTarget else { return }
+            let target = activeTarget
+            confirmedOpenTask?.cancel()
+            confirmedOpenTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                var activated = false
+                do {
+                    try await self.prepareVoiceKeyForConfirmedOpen?()
+                    try Task.checkCancellation()
+                    _ = try await ConfirmedApplicationOpen.activate(target); activated = true
+                    self.openingTargetActivated = true
+                    try Task.checkCancellation()
+                    guard self.navigation.requestID == request, self.activeTarget == target else { return }
+                    if target == .weChat {
+                        // Listing is supported, but no verified public recipient control exists on this Mac.
+                        self.navigation.dispatched(request: request, session: session, accepted: false)
+                        self.navigation.suspend(); self.panel?.orderOut(nil)
+                        self.message = "微信主界面已打开；当前微信未提供可定位聊天的控件，请手动选择聊天。"
+                        self.refreshError = self.message; self.captureRotaryForNavigation()
+                        self.showNotice("微信已打开，请手动选择聊天。")
+                        return
+                    }
+                    let result = try await DesktopAccessibilityAdapter.openFresh(session)
+                    try Task.checkCancellation()
+                    guard self.navigation.requestID == request, self.activeTarget == target else { return }
+                    (target == .deepSeek ? self.deepSeekAdapter : self.claudeAdapter).adopt(result.listing)
+                    self.adapterSessions = result.listing.sessions
+                    self.navigation.dispatched(request: request, session: session, accepted: result.selectedVerified)
+                    self.recordOpened(session); self.rotaryEditing = true; self.refreshPhysicalFocusRoute()
+                    self.message = result.composerFocused ? "输入框已聚焦。" : "会话已打开，请点击主输入框后输入。"
+                } catch is CancellationError { return }
+                catch {
+                    guard self.navigation.requestID == request, self.activeTarget == target else { return }
+                    self.navigation.dispatched(request: request, session: session, accepted: false)
+                    self.message = error.localizedDescription; self.refreshError = self.message
+                    if activated { self.navigation.suspend(); self.panel?.orderOut(nil); self.captureRotaryForNavigation() }
+                    else { self.present() }
+                }
             }
             return
         }

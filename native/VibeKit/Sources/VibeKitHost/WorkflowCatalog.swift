@@ -45,7 +45,7 @@ public enum WorkflowCatalog {
               capabilities: [.conversations, .openConversation, .focusComposer, .nativeArrows], detail: "已接入 Claude App 的 Code 页面：侧栏选会话，进入后聚焦 Prompt。",
               nextStep: "请先展开 Code 侧栏；旋钮编辑与浏览翻页请实机验收。"),
         .init(id: .weChat, name: "微信", symbol: "message", transport: .native, integrated: false,
-              capabilities: [], detail: "本机会话列表与选择器可用；自动打开聊天和输入框聚焦仍待微信接口验证。",
+              capabilities: [], detail: "本机会话列表和主窗口唤起可用；指定聊天定位及输入框聚焦仍待微信接口验证。",
               nextStep: "已配置只读来源时显示最近50个会话；当前不会猜测或打开同名聊天。")
     ]
     public static func target(_ id: WorkflowTargetID) -> WorkflowDescriptor { targets.first { $0.id == id }! }

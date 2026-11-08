@@ -755,5 +755,40 @@ do {
     check("eligibility loss while held closes mic", initial.edge(down: true, eligible: false) == false && !initial.isOpen)
 }
 
+
+// Voice restoration can finish while rotary routing continues, never before verification.
+do {
+    let ids = ["dialP", "dialL", "dialR", "btn3", "btn1", "btn2"]
+    let slots = ids.enumerated().map { i, id in
+        NavigationCaptureJournal.Slot(id: id, index: UInt8(i), original: ["A"], originalFunction: id == "btn1" ? 12 : 0, captureKey: SentinelPool.mainKeys[i], nativeBackspace: id == "btn3" ? true : nil, selectorPaging: id == "btn1" || id == "btn2" ? true : nil)
+    }
+    for previous in [NativePageScroll.Mode.navigation, .arrows, .pages, .selection] {
+        for mode in [NativePageScroll.Mode.navigation, .arrows, .pages, .selection] {
+            var events: [String] = []
+            let ok = NativePageScroll.apply(slots: slots, mode: mode, previousMode: previous,
+                voiceKeyRestored: { events.append("voice-ready") },
+                restoreOriginal: { events.append("restore-" + $0.id); return true },
+                writeAndVerify: { slot, _ in events.append("write-" + slot.id); return true })
+            check("optimized route succeeds", ok)
+            check("voice permission only outside selector", events.filter { $0 == "voice-ready" }.count == (mode == .selection ? 0 : 1))
+            if previous == mode { check("same verified route writes no hardware", events.allSatisfy { $0 == "voice-ready" }) }
+            if previous == .selection, mode != .selection {
+                check("voice restored first", Array(events.prefix(2)) == ["restore-btn1", "voice-ready"])
+                check("voice ready before remaining writes", events.firstIndex(of: "voice-ready")! < events.firstIndex(of: "restore-btn2")!)
+            }
+            if previous != .selection, mode != .selection { check("content changes do not rewrite voice or submit", !events.contains("restore-btn1") && !events.contains("restore-btn2")) }
+        }
+    }
+    var announced = false
+    let failed = NativePageScroll.apply(slots: slots, mode: .arrows, previousMode: .selection,
+        voiceKeyRestored: { announced = true }, restoreOriginal: { $0.id != "btn1" }, writeAndVerify: { _, _ in true })
+    check("failed voice readback never enables gate", !failed && !announced)
+    var held = VoiceHoldPress()
+    check("press before route ready remains silent", held.edge(down: true, eligible: false) == nil)
+    check("ready does not replay held voice key", held.edge(down: true, eligible: true) == nil && !held.isOpen)
+    _ = held.edge(down: false, eligible: true)
+    check("fresh press after verification opens immediately", held.edge(down: true, eligible: true) == true)
+}
+
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
 exit(failures == 0 ? 0 : 1)

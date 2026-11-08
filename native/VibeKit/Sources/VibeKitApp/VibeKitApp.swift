@@ -17,6 +17,9 @@ struct VibeKitApp: App {
     @ObservedObject private var language = AppLanguage.shared
 
     init() {
+        if let i = CommandLine.arguments.firstIndex(of: "--confirmed-desktop-check"), i + 1 < CommandLine.arguments.count {
+            runConfirmedDesktopCheck(path: CommandLine.arguments[i + 1], weChat: CommandLine.arguments.contains("--wechat"), alternate: CommandLine.arguments.contains("--verify-alternate-session"))
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--wechat-recent-check"), i + 1 < CommandLine.arguments.count {
             runWeChatRecentCheck(path: CommandLine.arguments[i + 1], live: CommandLine.arguments.contains("--verify-local-source"))
         }
