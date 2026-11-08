@@ -1938,6 +1938,12 @@ extension VibeVM {
         }
     }
     private func navigationPressed(_ slot: String) {
+        // A captured cancel belongs to our visible overlay, even while hardware
+        // routing is pending. Keep the physical-release and generation barriers.
+        if slot == "btn3", codexWorkflow.selectorIsVisible, !quitting {
+            if !selectorExitPress.isHeld { selectorExitGeneration = codexWorkflow.selectorGeneration }
+            selectorExitPress.press(); return
+        }
         guard codexWorkflow.ready, !codexWorkflow.busy, connected, !quitting else { return }
         if (slot == "dialL" || slot == "dialR"), codexWorkflow.navigation.stage == .choosing {
             if navigationRotationHeld.insert(slot).inserted { codexWorkflow.rotate(slot == "dialL" ? -1 : 1) }
@@ -1976,8 +1982,7 @@ extension VibeVM {
             let close = selectorExitPress.release()
             let sameSelector = selectorExitGeneration == codexWorkflow.selectorGeneration
             selectorExitGeneration = nil
-            if close, sameSelector, codexWorkflow.ready, !codexWorkflow.busy, !codexWorkflow.pageRoutingBusy,
-               connected, !quitting, codexWorkflow.navigation.stage == .choosing {
+            if close, sameSelector, !quitting, codexWorkflow.selectorIsVisible {
                 codexWorkflow.dismissSelector()
             }
             codexWorkflow.refreshPhysicalFocusRoute(); return

@@ -212,7 +212,9 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         if previous != navigation.selection { selectorGeneration = UUID(); cancelPendingGestures?() }
     }
     @Published var message = "导航模式未启用。"
-    @Published var ready = false
+    @Published var ready = false {
+        didSet { if oldValue && !ready && selectorIsVisible { dismissSelector() } }
+    }
     @Published var busy = false
     @Published var hasRecovery = false
     var cancelPendingGestures: (() -> Void)?
@@ -489,11 +491,35 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         refreshSessions(replaceSelector: true)
     }
     func dismissSelector() {
-        guard (ready || preview), navigation.stage == .choosing, !pageRoutingBusy else { return }
-        // Borderless overlay has no native close button; use its delegate-backed close path.
-        // Exactly the same cancellation semantics as the owned close button.
-        // The delegate suspends selection; no highlighted chat is opened.
-        panel?.close()
+        // Exiting our own overlay never depends on device readiness or an in-flight
+        // keymap write. Hide first, then invalidate UI work and restore desired routing.
+        guard selectorIsVisible || navigation.stage == .choosing else { return }
+        panel?.orderOut(nil)
+        finishSelectorCancellation()
+    }
+    private func finishSelectorCancellation() {
+        wheelSettleTask?.cancel(); wheelSettleTask = nil
+        selectorGeneration = UUID()
+        cancelRefresh(); cancelPendingGestures?()
+        if navigation.stage == .choosing {
+            _ = navigation.gesture(.single, control: .exit, sessions: sessions)
+        } else if navigation.stage == .opening { navigation.suspend() }
+        captureRotaryForNavigation()
+        message = "已取消会话选择；原会话保持不变。"
+    }
+    @discardableResult
+    private func handleSelectorKey(_ code: UInt16) -> Bool {
+        if code == 53, selectorIsVisible { dismissSelector(); return true }
+        guard navigation.stage == .choosing else { return false }
+        switch code {
+        case 36, 76: gesture(.single, control: .dial)
+        case 123: rotate(-1)
+        case 124: rotate(1)
+        case 116: if pageRoutingBusy { rotate(-1) } else { turnWheelPage(-1) }
+        case 121: if pageRoutingBusy { rotate(1) } else { turnWheelPage(1) }
+        default: return false
+        }
+        return true
     }
     func gesture(_ action: PressGesture.Action, control: CodexNavigation.Control) {
         guard (ready || preview), !switchingApplication else { return }
@@ -677,19 +703,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
             panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             panel.isFloatingPanel = true; panel.becomesKeyOnlyIfNeeded = false
             panel.isReleasedWhenClosed = false; panel.level = .floating; panel.hidesOnDeactivate = false
-            panel.selectorKey = { [weak self] code in
-                guard let self, self.navigation.stage == .choosing else { return false }
-                switch code {
-                case 53: self.dismissSelector()
-                case 36, 76: self.gesture(.single, control: .dial)
-                case 123: self.rotate(-1)
-                case 124: self.rotate(1)
-                case 116: if self.pageRoutingBusy { self.rotate(-1) } else { self.turnWheelPage(-1) }
-                case 121: if self.pageRoutingBusy { self.rotate(1) } else { self.turnWheelPage(1) }
-                default: return false
-                }
-                return true
-            }
+            panel.selectorKey = { [weak self] code in self?.handleSelectorKey(code) ?? false }
             panel.delegate = self
             panel.contentView = NSHostingView(rootView: SessionSelectorView(controller: self))
             self.panel = panel
@@ -725,14 +739,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         do { try data.write(to: URL(fileURLWithPath: path)); return true } catch { return false }
     }
     func windowWillClose(_ notification: Notification) {
-        wheelSettleTask?.cancel(); wheelSettleTask = nil
-        selectorGeneration = UUID()
-        cancelRefresh(); cancelPendingGestures?()
-        if navigation.stage == .choosing {
-            _ = navigation.gesture(.single, control: .exit, sessions: sessions)
-        }
-        captureRotaryForNavigation()
-        message = "已取消会话选择；原会话保持不变。"
+        finishSelectorCancellation()
         if preview && !CommandLine.arguments.contains("--preview-backdrop-check") && !CommandLine.arguments.contains("--preview-page-fade-check") { NSApplication.shared.stop(nil) }
     }
 }
@@ -1030,6 +1037,42 @@ extension CodexWorkflowController {
         do { try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted,.sortedKeys]).write(to: URL(fileURLWithPath:path)) }
         catch { return 1 }
         print("Selector response checks: \(checks.count), failures: \(checks.values.filter { !$0 }.count)")
+        return checks.values.allSatisfy { $0 } ? 0 : 1
+    }
+}
+
+@MainActor
+extension CodexWorkflowController {
+    static func runCancellationCheck(path: String) -> Int32 {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.finishLaunching()
+        let suite = "vibekey-cancel-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let c = CodexWorkflowController(defaults: defaults, preview: true)
+        var checks: [String: Bool] = [:]
+        var captures = 0
+        c.routePhysicalFocus = { _ in captures += 1; return false }
+        c.ready = true; c.enter()
+        checks["fixture_overlay_visible"] = c.selectorIsVisible
+        c.pageRoutingBusy = true
+        c.dismissSelector()
+        checks["cancel_while_mapping_hides_overlay"] = !c.selectorIsVisible && c.navigation.stage == .idle
+        let count = captures; c.dismissSelector()
+        checks["repeated_cancel_does_not_recapture"] = captures == count
+        c.pageRoutingBusy = false; c.enter(); c.ready = false
+        checks["readiness_loss_closes_overlay"] = !c.selectorIsVisible && c.navigation.stage == .idle
+        c.ready = true; c.enter(); c.navigation.suspend()
+        checks["escape_handles_stale_stage"] = c.handleSelectorKey(53) && !c.selectorIsVisible
+        c.enter(); c.pageRoutingBusy = true; c.selectorLoading = true
+        checks["escape_while_loading_and_mapping"] = c.handleSelectorKey(53) && !c.selectorIsVisible && c.navigation.stage == .idle
+        c.selectorLoading = false; c.pageRoutingBusy = false; c.enter()
+        checks["selector_reopens_after_cancel"] = c.selectorIsVisible && c.navigation.stage == .choosing
+        c.dismissSelector(); c.stop()
+        let data: [String: Any] = ["checks": checks, "hardware_or_target_UI_access": false]
+        do { try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path)) }
+        catch { return 1 }
+        print("Selector cancellation checks: \(checks.count), failures: \(checks.values.filter { !$0 }.count)")
         return checks.values.allSatisfy { $0 } ? 0 : 1
     }
 }

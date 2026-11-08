@@ -34,6 +34,9 @@ struct VibeKitApp: App {
             let data = try! JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
             try! data.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1])); exit(before && !meter.captureAllocated ? 0 : 1)
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--selector-cancel-check"), i + 1 < CommandLine.arguments.count {
+            exit(CodexWorkflowController.runCancellationCheck(path: CommandLine.arguments[i + 1]))
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--selector-response-check"), i + 1 < CommandLine.arguments.count {
             exit(CodexWorkflowController.runResponseCheck(path: CommandLine.arguments[i + 1]))
         }

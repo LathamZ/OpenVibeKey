@@ -2,7 +2,10 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 61)
+## 1.0.0-preview.5 (build 62)
+
+- Cancel/Escape always dismiss the owned selector even during keymap routing or readiness loss. Losing navigation readiness hides it automatically; stale selection state cannot strand the overlay. Hardware recovery journals remain intact.
+- The native dial pointer gap now shares the perimeter-dot color, derived from the original glyph alpha; the existing surrounding halo and system-colored body remain.
 
 - The menu-bar label now supplies **one complete adaptive image** containing the original dial, a faint central radial halo, and all perimeter dots. This fixes build58: its separate template and dot Images could be extracted as only the first Image by MenuBarExtra, even though a general SwiftUI renderer showed both. The drawing handler resolves the system foreground in the **current drawing appearance**, independently of NSApp's global theme, with bitmap caching disabled for the adaptive wrapper. Static composites are cached by target, connection and resolved appearance. Light surfaces use a dark body, dark surfaces a light body; equal 50% dot enlargement remains. Build60 slightly lightens only the WeChat menu tint to #3DCE82, shared by its dots and central halo; selector brand colors are unchanged. Build61 makes the surrounding halo visible at menu-bar size: a 36% peak band near the dial edge fades smoothly outward and is drawn behind the crisp system-colored body. It uses the exact same target color as the perimeter dots. It does not pulse or recolor the perimeter dots.
 

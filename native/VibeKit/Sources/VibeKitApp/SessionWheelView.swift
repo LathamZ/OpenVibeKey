@@ -88,7 +88,7 @@ struct SessionWheelView: View {
                             .background(ink.opacity(0.06), in: Circle())
                     }.foregroundStyle(ink.opacity(0.85)).shadow(color: .black.opacity(0.7), radius: 2, y: 1).buttonStyle(.plain)
                         .help("取消 · 按钮 3").accessibilityLabel("取消会话选择")
-                        .disabled(controller.pageRoutingBusy).position(x: 500, y: 614)
+                        .position(x: 500, y: 614)
                 }.frame(width: 1000, height: 680).scaleEffect(scale)
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }

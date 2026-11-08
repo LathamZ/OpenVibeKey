@@ -184,6 +184,40 @@ enum WorkflowMenuIcon {
         cache.setObject(image, forKey: key)
         return image
     }
+    /// Fill only the original filled symbol's narrow internal gap. Deriving it
+    /// from the native alpha preserves the pointer shape instead of drawing a new bar.
+    private static let pointerAlpha: [UInt8] = {
+        let source = raster(primary: .white, secondary: .clear, connected: true)
+        let rgba = [UInt8](source.dataProvider!.data! as Data)
+        var alpha = [UInt8](repeating: 0, count: 72 * 64)
+        for y in 0..<64 {
+            let solid = (0..<72).filter { rgba[(y * 72 + $0) * 4 + 3] >= 220 }
+            guard let left = solid.first, let right = solid.last, right - left >= 8 else { continue }
+            let center = Double(left + right) / 2
+            let halfGap = Double(right - left) * 0.20
+            for x in (left + 1)..<right where abs(Double(x) - center) <= halfGap {
+                let pixel = y * 72 + x
+                alpha[pixel] = 255 - rgba[pixel * 4 + 3]
+            }
+        }
+        return alpha
+    }()
+    static var pointerPixelCount: Int { pointerAlpha.filter { $0 > 180 }.count }
+    private static func pointerImage(target: WorkflowTargetID) -> CGImage {
+        let tint = color(target).usingColorSpace(.sRGB)!
+        var rgba = [UInt8](repeating: 0, count: 72 * 64 * 4)
+        for i in pointerAlpha.indices {
+            let a = Double(pointerAlpha[i])
+            rgba[i * 4] = UInt8((tint.redComponent * a).rounded())
+            rgba[i * 4 + 1] = UInt8((tint.greenComponent * a).rounded())
+            rgba[i * 4 + 2] = UInt8((tint.blueComponent * a).rounded())
+            rgba[i * 4 + 3] = pointerAlpha[i]
+        }
+        return CGImage(width: 72, height: 64, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 72 * 4,
+                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+                       provider: CGDataProvider(data: Data(rgba) as CFData)!, decode: nil, shouldInterpolate: true, intent: .defaultIntent)!
+    }
     static let glowStrength = 0.36
     private static func drawGlow(target: WorkflowTargetID, connected: Bool, context: CGContext) {
         let body = raster(primary: .white, secondary: .clear, connected: connected)
@@ -233,6 +267,7 @@ enum WorkflowMenuIcon {
                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
         drawGlow(target: target, connected: connected, context: context)
         context.draw(raster(primary: foreground, secondary: .clear, connected: connected), in: CGRect(x:0,y:0,width:72,height:64))
+        context.draw(pointerImage(target: target), in: CGRect(x: 0, y: 0, width: 72, height: 64))
         drawDots(target: target, connected: connected, context: context)
         let cg = context.makeImage()!
         let image = NSImage(cgImage: cg, size: NSSize(width: 18, height: 16))
@@ -247,6 +282,7 @@ enum WorkflowMenuIcon {
 func runWorkflowMenuIconCheck(path: String) -> Int32 {
     var checks = 0, failures = 0
     func check(_ value: Bool) { checks += 1; if !value { failures += 1 } }
+    check(WorkflowMenuIcon.pointerPixelCount >= 5)
     var results: [[String: Any]] = []
     for darkAppearance in [false, true] { for connected in [true, false] { for target in WorkflowAppCycle.order {
         let icon = WorkflowMenuIcon.make(target: target, connected: connected, darkAppearance: darkAppearance)
