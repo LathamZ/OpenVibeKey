@@ -235,6 +235,11 @@ enum WorkflowMenuIcon {
     static func make(target: WorkflowTargetID, connected: Bool, darkAppearance: Bool = false) -> NSImage {
         make(target: target, connected: connected, appearance: NSAppearance(named: darkAppearance ? .darkAqua : .aqua)!)
     }
+    /// Codex's white tint disappears into a light menu surface; preserve the
+    /// native transparent notch there rather than filling it with another color.
+    static func fillsPointer(target: WorkflowTargetID, appearance: NSAppearance) -> Bool {
+        target != .codex || appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
     static func make(target: WorkflowTargetID, connected: Bool, appearance: NSAppearance) -> NSImage {
         let foreground = bodyColor(appearance: appearance)
         let key = "\(target.rawValue)-\(connected)-\(appearance.name.rawValue)-\(foreground.redComponent)-\(foreground.greenComponent)-\(foreground.blueComponent)-\(foreground.alphaComponent)" as NSString
@@ -244,7 +249,9 @@ enum WorkflowMenuIcon {
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
         context.draw(raster(primary: foreground, secondary: .clear, connected: connected), in: CGRect(x:0,y:0,width:72,height:64))
-        context.draw(pointerImage(target: target), in: CGRect(x: 0, y: 0, width: 72, height: 64))
+        if fillsPointer(target: target, appearance: appearance) {
+            context.draw(pointerImage(target: target), in: CGRect(x: 0, y: 0, width: 72, height: 64))
+        }
         drawDots(target: target, connected: connected, context: context)
         let cg = context.makeImage()!
         let image = NSImage(cgImage: cg, size: NSSize(width: 18, height: 16))
@@ -269,6 +276,20 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         let tint = WorkflowMenuIcon.color(target).usingColorSpace(.sRGB)!
         let bodyPixels = [UInt8](WorkflowMenuIcon.bodyImage(connected: connected, darkAppearance: darkAppearance).dataProvider!.data! as Data)
         let dotPixels = [UInt8](WorkflowMenuIcon.dotImage(target: target, connected: connected).cgImage(forProposedRect: nil, context: nil, hints: nil)!.dataProvider!.data! as Data)
+        // Inspect the original notch interior: the light Codex variant must
+        // retain its original alpha, while the other variants keep their tint.
+        let pointerPixels = [UInt8](WorkflowMenuIcon.pointerImage(target: target).dataProvider!.data! as Data)
+        let notch = original.alpha.indices.filter { bodyPixels[$0*4+3] < 8 && dotPixels[$0*4+3] < 8 && pointerPixels[$0*4+3] > 220 }
+        // The disconnected SF Symbol is an outline with no filled-body notch.
+        // Existing body/dot and full-image checks cover that variant.
+        if connected {
+            check(!notch.isEmpty)
+            if target == .codex && !darkAppearance {
+                check(notch.allSatisfy { pixels[$0*4+3] == bodyPixels[$0*4+3] })
+            } else {
+                check(notch.allSatisfy { pixels[$0*4+3] > 220 })
+            }
+        }
         var alphaMatches = true, bodyMatches = true, outerMatches = true, bodySamples = 0
         for pixel in original.alpha.indices {
             if bodyPixels[pixel*4+3] > 0 { alphaMatches = alphaMatches && pixels[pixel*4+3] >= bodyPixels[pixel*4+3] }
@@ -295,7 +316,9 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         let opposite = WorkflowMenuIcon.make(target: target, connected: connected, darkAppearance: !darkAppearance)
         check(cached === icon); check(opposite !== icon)
         results.append(["target": target.rawValue, "connected": connected, "darkAppearance": darkAppearance, "hex": WorkflowMenuIcon.menuHex(target),
-                        "originalDialBodyPreserved": alphaMatches, "bodyForegroundAndPointerValid": bodyMatches, "outerComponents": WorkflowMenuIcon.points(connected: connected).count, "pointScale": WorkflowMenuIcon.pointScale(target)])
+                        "originalDialBodyPreserved": alphaMatches, "bodyForegroundAndPointerValid": bodyMatches, "outerComponents": WorkflowMenuIcon.points(connected: connected).count, "pointScale": WorkflowMenuIcon.pointScale(target),
+                        "pointerFillMode": target == .codex && !darkAppearance ? "native-transparent-gap" : "app-color",
+                        "notchSamples": notch.count])
         if connected {
             let url = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("menu-\(target.rawValue)-\(darkAppearance ? "dark" : "light").png")
             if let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) {
@@ -371,10 +394,19 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
             }
         }
     }}
+    for name in [NSAppearance.Name.aqua, .vibrantLight, .accessibilityHighContrastAqua,
+                 .darkAqua, .vibrantDark, .accessibilityHighContrastDarkAqua] {
+        guard let appearance = NSAppearance(named: name) else { check(false); continue }
+        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        check(WorkflowMenuIcon.fillsPointer(target: .codex, appearance: appearance) == dark)
+        for target in WorkflowAppCycle.order where target != .codex {
+            check(WorkflowMenuIcon.fillsPointer(target: target, appearance: appearance))
+        }
+    }
     application.appearance = savedAppearance
     let report: [String: Any] = ["checks": checks, "failures": failures, "targets": results,
                                "native_surface_appearance_checks": surfaceResults,
-                               "foreground_source": "complete adaptive image resolves current drawing appearance; same-color pointer and perimeter dots, no glow",
+                               "foreground_source": "complete adaptive image resolves current drawing appearance; Codex light-surface native transparent gap; app-colored pointer otherwise; perimeter dots unchanged, no glow",
                                "system_setting_changed": false, "hardware_or_target_UI_access": false]
     do { try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path)) }
     catch { return 1 }

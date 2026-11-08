@@ -2,7 +2,9 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 66)
+## 1.0.0-preview.5 (build 67)
+
+- On light menu surfaces, Codex keeps the original transparent pointer gap instead of a white fill. Its dark-surface pointer and other Apps retain their existing tint. The dial body, dots and local drawing-appearance behavior are unchanged.
 
 - Removed the menu-bar halo. The original system-adaptive dial, colored pointer gap and equally enlarged perimeter dots remain. Conversation selector glow/glass is unchanged.
 
