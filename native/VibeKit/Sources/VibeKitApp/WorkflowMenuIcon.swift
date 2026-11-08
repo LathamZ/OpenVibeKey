@@ -184,7 +184,7 @@ enum WorkflowMenuIcon {
         cache.setObject(image, forKey: key)
         return image
     }
-    static let glowStrength = 0.14
+    static let glowStrength = 0.36
     private static func drawGlow(target: WorkflowTargetID, connected: Bool, context: CGContext) {
         let body = raster(primary: .white, secondary: .clear, connected: connected)
         let pixels = [UInt8](body.dataProvider!.data! as Data)
@@ -192,12 +192,15 @@ enum WorkflowMenuIcon {
         guard let minX = occupied.map({ $0 % 72 }).min(), let maxX = occupied.map({ $0 % 72 }).max(),
               let minY = occupied.map({ $0 / 72 }).min(), let maxY = occupied.map({ $0 / 72 }).max() else { return }
         let center = CGPoint(x: Double(minX + maxX + 1) / 2, y: 64 - Double(minY + maxY + 1) / 2)
-        let radius = Double(max(maxX - minX + 1, maxY - minY + 1)) * 0.62
+        let radius = Double(max(maxX - minX + 1, maxY - minY + 1)) * 0.65
         let tint = color(target)
-        let colors = [tint.withAlphaComponent(glowStrength).cgColor,
-                      tint.withAlphaComponent(glowStrength * 0.36).cgColor,
+        // Keep the luminous band near the dial edge instead of spending the
+        // peak inside its opaque body. The body is drawn on top, still crisp.
+        let colors = [tint.withAlphaComponent(glowStrength * 0.25).cgColor,
+                      tint.withAlphaComponent(glowStrength).cgColor,
+                      tint.withAlphaComponent(glowStrength * 0.8).cgColor,
                       tint.withAlphaComponent(0).cgColor] as CFArray
-        let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB)!, colors: colors, locations: [0, 0.55, 1])!
+        let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB)!, colors: colors, locations: [0, 0.60, 0.78, 1])!
         context.saveGState()
         context.drawRadialGradient(gradient, startCenter: center, startRadius: 0,
                                    endCenter: center, endRadius: radius, options: [])
@@ -228,8 +231,8 @@ enum WorkflowMenuIcon {
         let context = CGContext(data: nil, width: 72, height: 64, bitsPerComponent: 8, bytesPerRow: 72 * 4,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
-        context.draw(raster(primary: foreground, secondary: .clear, connected: connected), in: CGRect(x:0,y:0,width:72,height:64))
         drawGlow(target: target, connected: connected, context: context)
+        context.draw(raster(primary: foreground, secondary: .clear, connected: connected), in: CGRect(x:0,y:0,width:72,height:64))
         drawDots(target: target, connected: connected, context: context)
         let cg = context.makeImage()!
         let image = NSImage(cgImage: cg, size: NSSize(width: 18, height: 16))
@@ -337,7 +340,15 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         let expectedData = Array(UnsafeBufferPointer(start: expectedContext.data!.assumingMemoryBound(to: UInt8.self), count: cg.width * cg.height * 4))
         let actualData = Array(UnsafeBufferPointer(start: bytes, count: cg.width * cg.height * 4))
         check(zip(actualData, expectedData).allSatisfy { abs(Int($0) - Int($1)) <= 2 })
-        check(WorkflowMenuIcon.glowStrength > 0 && WorkflowMenuIcon.glowStrength <= 0.15)
+        // A visible surrounding halo must exist outside both the dial and dots.
+        // This checks the rendered image, not just a nonzero strength constant.
+        let bodyMask = WorkflowMenuIcon.mask(connected: true)
+        let dotMask = WorkflowMenuIcon.dotImage(target: target, connected: true).cgImage(forProposedRect: nil, context: nil, hints: nil)!
+        let dotData = [UInt8](dotMask.dataProvider!.data! as Data)
+        let haloSamples = (0..<(72 * 64)).filter {
+            bodyMask.alpha[$0] < 8 && dotData[$0 * 4 + 3] < 8 && actualData[$0 * 4 + 3] >= 24
+        }.count
+        check(haloSamples >= 40)
         surfaceResults.append(["darkSurface": dark, "target": target.rawValue, "appOpposite": true,
                                "bodyPixelSamples": samples, "systemForegroundMatches": match])
         if target == .deepSeek {
