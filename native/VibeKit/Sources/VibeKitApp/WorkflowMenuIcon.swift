@@ -38,7 +38,7 @@ func beginMenuSurfacePreview(path: String) {
         let dark = surfaces.contains { $0.contains("Dark") }
         let result: [String: Any] = ["passed": light && dark, "surfaces": surfaces, "draws": draws,
             "both_surface_variants_drawn": light && dark,
-            "foreground_strategy": "one adaptive image with body, glow and dots; current drawing appearance",
+            "foreground_strategy": "one adaptive image with body, pointer and dots; current drawing appearance",
             "app_appearance": NSApp.effectiveAppearance.name.rawValue,
             "system_setting_changed": false, "hardware_started": false,
             "final_visible_variant_verified": false]
@@ -203,7 +203,7 @@ enum WorkflowMenuIcon {
         return alpha
     }()
     static var pointerPixelCount: Int { pointerAlpha.filter { $0 > 180 }.count }
-    private static func pointerImage(target: WorkflowTargetID) -> CGImage {
+    static func pointerImage(target: WorkflowTargetID) -> CGImage {
         let tint = color(target).usingColorSpace(.sRGB)!
         var rgba = [UInt8](repeating: 0, count: 72 * 64 * 4)
         for i in pointerAlpha.indices {
@@ -217,28 +217,6 @@ enum WorkflowMenuIcon {
                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
                        provider: CGDataProvider(data: Data(rgba) as CFData)!, decode: nil, shouldInterpolate: true, intent: .defaultIntent)!
-    }
-    static let glowStrength = 0.36
-    private static func drawGlow(target: WorkflowTargetID, connected: Bool, context: CGContext) {
-        let body = raster(primary: .white, secondary: .clear, connected: connected)
-        let pixels = [UInt8](body.dataProvider!.data! as Data)
-        let occupied = (0..<(72 * 64)).filter { pixels[$0 * 4 + 3] > 180 }
-        guard let minX = occupied.map({ $0 % 72 }).min(), let maxX = occupied.map({ $0 % 72 }).max(),
-              let minY = occupied.map({ $0 / 72 }).min(), let maxY = occupied.map({ $0 / 72 }).max() else { return }
-        let center = CGPoint(x: Double(minX + maxX + 1) / 2, y: 64 - Double(minY + maxY + 1) / 2)
-        let radius = Double(max(maxX - minX + 1, maxY - minY + 1)) * 0.65
-        let tint = color(target)
-        // Keep the luminous band near the dial edge instead of spending the
-        // peak inside its opaque body. The body is drawn on top, still crisp.
-        let colors = [tint.withAlphaComponent(glowStrength * 0.25).cgColor,
-                      tint.withAlphaComponent(glowStrength).cgColor,
-                      tint.withAlphaComponent(glowStrength * 0.8).cgColor,
-                      tint.withAlphaComponent(0).cgColor] as CFArray
-        let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB)!, colors: colors, locations: [0, 0.60, 0.78, 1])!
-        context.saveGState()
-        context.drawRadialGradient(gradient, startCenter: center, startRadius: 0,
-                                   endCenter: center, endRadius: radius, options: [])
-        context.restoreGState()
     }
     static func bodyColor(appearance: NSAppearance) -> NSColor {
         var resolved = NSColor.labelColor
@@ -265,7 +243,6 @@ enum WorkflowMenuIcon {
         let context = CGContext(data: nil, width: 72, height: 64, bitsPerComponent: 8, bytesPerRow: 72 * 4,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
-        drawGlow(target: target, connected: connected, context: context)
         context.draw(raster(primary: foreground, secondary: .clear, connected: connected), in: CGRect(x:0,y:0,width:72,height:64))
         context.draw(pointerImage(target: target), in: CGRect(x: 0, y: 0, width: 72, height: 64))
         drawDots(target: target, connected: connected, context: context)
@@ -297,7 +274,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
             if bodyPixels[pixel*4+3] > 0 { alphaMatches = alphaMatches && pixels[pixel*4+3] >= bodyPixels[pixel*4+3] }
             guard pixels[pixel*4+3] > 180 else { continue }
             let body = bodyPixels[pixel*4+3] > 180
-            // Halo may increase a body-edge pixel's alpha; that does not make it a perimeter dot.
+            // Classify perimeter dots by their own alpha mask.
             guard body || dotPixels[pixel*4+3] > 180 else { continue }
             let alpha = Double(pixels[pixel*4+3])
             let foreground = WorkflowMenuIcon.bodyColor(darkAppearance: darkAppearance)
@@ -318,7 +295,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         let opposite = WorkflowMenuIcon.make(target: target, connected: connected, darkAppearance: !darkAppearance)
         check(cached === icon); check(opposite !== icon)
         results.append(["target": target.rawValue, "connected": connected, "darkAppearance": darkAppearance, "hex": WorkflowMenuIcon.menuHex(target),
-                        "originalDialBodyPreserved": alphaMatches, "bodyForegroundAndGlowValid": bodyMatches, "outerComponents": WorkflowMenuIcon.points(connected: connected).count, "pointScale": WorkflowMenuIcon.pointScale(target)])
+                        "originalDialBodyPreserved": alphaMatches, "bodyForegroundAndPointerValid": bodyMatches, "outerComponents": WorkflowMenuIcon.points(connected: connected).count, "pointScale": WorkflowMenuIcon.pointScale(target)])
         if connected {
             let url = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("menu-\(target.rawValue)-\(darkAppearance ? "dark" : "light").png")
             if let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) {
@@ -376,15 +353,15 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         let expectedData = Array(UnsafeBufferPointer(start: expectedContext.data!.assumingMemoryBound(to: UInt8.self), count: cg.width * cg.height * 4))
         let actualData = Array(UnsafeBufferPointer(start: bytes, count: cg.width * cg.height * 4))
         check(zip(actualData, expectedData).allSatisfy { abs(Int($0) - Int($1)) <= 2 })
-        // A visible surrounding halo must exist outside both the dial and dots.
-        // This checks the rendered image, not just a nonzero strength constant.
+        // No glow may remain outside the dial, enlarged dots and pointer masks.
         let bodyMask = WorkflowMenuIcon.mask(connected: true)
         let dotMask = WorkflowMenuIcon.dotImage(target: target, connected: true).cgImage(forProposedRect: nil, context: nil, hints: nil)!
         let dotData = [UInt8](dotMask.dataProvider!.data! as Data)
+        let pointerData = [UInt8](WorkflowMenuIcon.pointerImage(target: target).dataProvider!.data! as Data)
         let haloSamples = (0..<(72 * 64)).filter {
-            bodyMask.alpha[$0] < 8 && dotData[$0 * 4 + 3] < 8 && actualData[$0 * 4 + 3] >= 24
+            bodyMask.alpha[$0] < 8 && dotData[$0 * 4 + 3] < 8 && pointerData[$0 * 4 + 3] < 8 && actualData[$0 * 4 + 3] >= 24
         }.count
-        check(haloSamples >= 40)
+        check(haloSamples == 0)
         surfaceResults.append(["darkSurface": dark, "target": target.rawValue, "appOpposite": true,
                                "bodyPixelSamples": samples, "systemForegroundMatches": match])
         if target == .deepSeek {
@@ -397,7 +374,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
     application.appearance = savedAppearance
     let report: [String: Any] = ["checks": checks, "failures": failures, "targets": results,
                                "native_surface_appearance_checks": surfaceResults,
-                               "foreground_source": "complete adaptive image resolves current drawing appearance; same-color radial center halo and perimeter dots",
+                               "foreground_source": "complete adaptive image resolves current drawing appearance; same-color pointer and perimeter dots, no glow",
                                "system_setting_changed": false, "hardware_or_target_UI_access": false]
     do { try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path)) }
     catch { return 1 }
