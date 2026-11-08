@@ -22,6 +22,10 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     private let claudeAdapter = DesktopAccessibilityAdapter(target: .claudeCode)
     @Published private(set) var activeTarget: WorkflowTargetID = .codex
     @Published private(set) var weChatFavorites: [CodexSession] = []
+    private let weChatSourceConfigURL: URL?
+    private var weChatListTask: Task<WeChatRecentListing, Error>?
+    @Published private(set) var weChatRecentSessions: [CodexSession] = []
+    var weChatRecentConfigured: Bool { !preview && weChatSourceConfigURL.map { FileManager.default.fileExists(atPath: $0.path) } == true }
     var canPresentSelector: Bool { activeTarget == .weChat || WorkflowCatalog.supports(.conversations, in: activeTarget) }
     @Published private(set) var adapterSessions: [CodexSession] = []
     var contentBundleID: String { activeTarget.bundleID ?? "" }
@@ -94,7 +98,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     var sessions: [CodexSession] {
         switch activeTarget {
         case .codex: return CodexSessionCatalog.merge(pinned: pinnedSessions, recent: recentThreads)
-        case .weChat: return weChatFavorites
+        case .weChat: return weChatRecentConfigured ? weChatRecentSessions : weChatFavorites
         default: return adapterSessions
         }
     }
@@ -167,6 +171,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     var wheelPageCount: Int { SessionWheelPaging.pageCount(navigation.candidates.count) }
     var wheelRange: Range<Int> { SessionWheelPaging.range(selection: navigation.selection, count: navigation.candidates.count) }
     var wheelSessions: [CodexSession] {
+        if activeTarget == .weChat, weChatRecentConfigured { return filteredSessions }
         let activity = activeTarget == .codex
             ? Dictionary(recentThreads.map { ($0.session.id, Double($0.updatedAt)) }, uniquingKeysWith: max)
             : Dictionary(sessions.enumerated().map { ($0.element.id, Double(sessions.count - $0.offset)) }, uniquingKeysWith: max)
@@ -257,7 +262,8 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
         return nativeFocusConfigured ? nativeFocusMainKey : nil
     }
 
-    init(defaults: UserDefaults = .standard, preview: Bool = false) {
+    init(defaults: UserDefaults = .standard, preview: Bool = false, weChatSourceConfigURL: URL? = WeChatRecentSource.defaultConfigURL) {
+        self.weChatSourceConfigURL = weChatSourceConfigURL
         self.defaults = defaults; self.preview = preview
         if !preview, let saved = defaults.object(forKey: RotaryHoldTiming.preferenceKey) as? Double {
             rotaryHoldInterval = RotaryHoldTiming.normalized(saved)
@@ -325,7 +331,7 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                         self.refreshPhysicalFocusRoute()
                         self.message = "其他 App：旋钮默认 ←／→；回到 Codex 后恢复" + self.rotaryModeLabel
                     } else {
-                        self.suspend(message: "其他 App：旋钮默认 ←／→；长按旋钮可选择 Codex 会话。")
+                        self.suspend(message: "其他 App：旋钮默认 ←／→；长按旋钮可选择会话。", preserveRefresh: self.navigation.stage != .choosing && self.navigation.stage != .opening)
                     }
                 }
             }
@@ -397,11 +403,12 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
     }
     private func cancelRefresh() {
         if refreshing { listStatus = recentThreads.isEmpty ? "读取已取消；固定会话仍可使用。" : "已保留最近读取的会话，可再次刷新。" }
-        refreshGeneration = UUID(); listTask?.cancel(); listTask = nil; desktopListTask?.cancel(); desktopListTask = nil
+        refreshGeneration = UUID(); listTask?.cancel(); listTask = nil; desktopListTask?.cancel(); desktopListTask = nil; weChatListTask?.cancel(); weChatListTask = nil
         refreshing = false; selectorLoading = false
     }
     func refreshSessions(replaceSelector: Bool = false) {
         if activeTarget == .weChat {
+            if weChatRecentConfigured { refreshWeChatRecent(replaceSelector: replaceSelector); return }
             cancelRefresh(); refreshError = nil
             listStatus = weChatFavorites.isEmpty ? "尚未配置常用会话。" : "已配置 \(weChatFavorites.count) 个常用会话；微信自动打开仍待接口验证。"
             ensureColors()
@@ -465,6 +472,35 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
                 }
             case .failure(let error):
                 self.listStatus = error.localizedDescription + (self.recentThreads.isEmpty ? " 当前仅显示固定会话。" : " 已保留上次读取的列表。")
+                self.refreshError = self.listStatus
+            }
+        }
+    }
+    private func refreshWeChatRecent(replaceSelector: Bool) {
+        guard !preview, let configURL = weChatSourceConfigURL else { return }
+        if refreshing {
+            if replaceSelector { selectorLoading = navigation.candidates.isEmpty }
+            return
+        }
+        let selection = navigation.selected?.id
+        cancelRefresh()
+        let generation = UUID(); refreshGeneration = generation
+        refreshing = true; selectorLoading = replaceSelector && navigation.candidates.isEmpty
+        refreshError = nil; listStatus = "正在读取本机微信最近会话…"
+        let task = Task.detached(priority: .userInitiated) { try await WeChatRecentSource.fetch(configURL: configURL) }
+        weChatListTask = task
+        Task { @MainActor [weak self] in
+            let result = await task.result
+            guard let self, self.refreshGeneration == generation, self.activeTarget == .weChat else { return }
+            self.weChatListTask = nil; self.refreshing = false; self.selectorLoading = false
+            switch result {
+            case .success(let listing):
+                self.weChatRecentSessions = listing.sessions.compactMap { CodexSession(adapterReference: $0.id, title: $0.title, target: .weChat) }
+                self.ensureColors()
+                self.listStatus = "已更新本机微信最近 \(self.weChatRecentSessions.count) 个会话；按最近联系排序，已排除隐藏项。自动打开聊天尚待验证。"
+                if self.navigation.stage == .choosing, !self.selectorInteracted { self.enterWheel(preferredID: selection) }
+            case .failure:
+                self.listStatus = "本机微信最近会话读取失败。" + (self.weChatRecentSessions.isEmpty ? "请检查本机只读服务。" : "当前保留上次列表，可重试刷新。")
                 self.refreshError = self.listStatus
             }
         }
@@ -569,10 +605,10 @@ final class CodexWorkflowController: NSObject, ObservableObject, NSWindowDelegat
             wheelSnapping = true; wheelPosition = wheelMotion.position
         } else { resetWheelMotion() }
     }
-    func suspend(message: String) {
+    func suspend(message: String, preserveRefresh: Bool = false) {
         wheelSettleTask?.cancel(); wheelSettleTask = nil
         selectorGeneration = UUID()
-        navigation.suspend(); captureRotaryForNavigation(); cancelRefresh(); cancelPendingGestures?(); panel?.orderOut(nil); self.message = message
+        navigation.suspend(); captureRotaryForNavigation(); if !preserveRefresh { cancelRefresh() }; cancelPendingGestures?(); panel?.orderOut(nil); self.message = message
     }
     func stop() {
         wheelSettleTask?.cancel(); wheelSettleTask = nil

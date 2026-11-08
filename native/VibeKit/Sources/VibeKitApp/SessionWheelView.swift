@@ -99,9 +99,9 @@ struct SessionWheelView: View {
             if page.loading {
                 ProgressView().controlSize(.small)
             } else if page.items.isEmpty {
-                Text(controller.activeTarget == .weChat ? "尚未添加常用会话" : "暂无会话").font(.system(size: 20, weight: .medium))
+                Text(controller.activeTarget == .weChat ? (controller.weChatRecentConfigured ? "暂无最近会话" : "尚未添加常用会话") : "暂无会话").font(.system(size: 20, weight: .medium))
                 if controller.activeTarget == .weChat {
-                    Button("管理常用会话") {
+                    Button(controller.weChatRecentConfigured ? "查看会话来源" : "管理常用会话") {
                         controller.dismissSelector(); openWindow(id: "session-management"); NSApp.activate(ignoringOtherApps: true)
                     }.buttonStyle(.plain)
                 }

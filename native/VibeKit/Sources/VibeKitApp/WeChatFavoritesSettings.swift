@@ -6,7 +6,10 @@ struct WorkflowSessionSettings: View {
     @ObservedObject var vm: VibeVM
     @ObservedObject var controller: CodexWorkflowController
     var body: some View {
-        if controller.activeTarget == .weChat { WeChatFavoritesSettings(controller: controller) }
+        if controller.activeTarget == .weChat {
+            if controller.weChatRecentConfigured { WeChatRecentSettings(controller: controller) }
+            else { WeChatFavoritesSettings(controller: controller) }
+        }
         else { CodexNavigationSettings(vm: vm, controller: controller) }
     }
 }
@@ -66,7 +69,7 @@ func runWorkflowEntryCheck(path: String) -> Int32 {
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
     defaults.set(WorkflowTargetID.weChat.rawValue, forKey: "workflow.activeTarget.v1")
-    let controller = CodexWorkflowController(defaults: defaults)
+    let controller = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil)
     var checks: [String: Bool] = [:]
     checks["wechat_selector_independent_of_unverified_desktop_capability"] = controller.canPresentSelector && !WorkflowCatalog.supports(.openConversation, in: .weChat)
     checks["new_favorites_empty"] = controller.weChatFavorites.isEmpty
@@ -76,7 +79,7 @@ func runWorkflowEntryCheck(path: String) -> Int32 {
     checks["duplicate_rejected"] = !controller.addWeChatFavorite(title: "Fixture One")
     checks["second_favorite_added"] = controller.addWeChatFavorite(title: "Fixture Two")
     let ids = controller.weChatFavorites.map(\.id)
-    let restored = CodexWorkflowController(defaults: defaults)
+    let restored = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil)
     checks["favorites_persist_with_stable_local_ids"] = restored.weChatFavorites.map(\.id) == ids && restored.weChatFavorites.map(\.title) == ["Fixture One", "Fixture Two"]
     checks["favorites_are_wechat_only"] = restored.sessions.allSatisfy { $0.target == .weChat && $0.isValid }
     controller.ready = true
@@ -91,15 +94,58 @@ func runWorkflowEntryCheck(path: String) -> Int32 {
     controller.gesture(.single, control: .exit)
     checks["third_button_cancels_wechat_selector"] = !controller.selectorIsVisible && controller.navigation.stage != .choosing
     controller.removeWeChatFavorite(ids[0])
-    checks["remove_persists"] = CodexWorkflowController(defaults: defaults).weChatFavorites.map(\.id) == [ids[1]]
+    checks["remove_persists"] = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: nil).weChatFavorites.map(\.id) == [ids[1]]
     controller.selectTarget(.codex)
     checks["wechat_favorites_never_enter_codex_list"] = !controller.sessions.contains { $0.target == .weChat }
     controller.selectTarget(.weChat)
     checks["switching_target_preserves_favorites"] = controller.sessions.map(\.id) == [ids[1]]
+    // An ordinary window switch must not cancel background metadata refresh.
+    // The fake config fails parsing before any token/network access.
+    let fakeConfig = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+    try! Data("{}".utf8).write(to: fakeConfig)
+    defer { try? FileManager.default.removeItem(at: fakeConfig) }
+    defaults.set(WorkflowTargetID.weChat.rawValue, forKey: "workflow.activeTarget.v1")
+    let loading = CodexWorkflowController(defaults: defaults, weChatSourceConfigURL: fakeConfig)
+    loading.refreshSessions()
+    loading.suspend(message: "", preserveRefresh: true)
+    checks["window_switch_keeps_background_refresh"] = loading.refreshing
+    loading.suspend(message: "")
+    checks["explicit_suspend_still_cancels_refresh"] = !loading.refreshing
+    loading.stop()
     controller.stop(); restored.stop()
     let report: [String: Any] = ["passed": checks.values.allSatisfy { $0 }, "checks": checks,
         "isolated_preferences": true, "hardware_started": false, "external_app_control": false]
     do { try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path)) }
     catch { return 1 }
     return checks.values.allSatisfy { $0 } ? 0 : 1
+}
+
+struct WeChatRecentSettings: View {
+    @ObservedObject var controller: CodexWorkflowController
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                WorkflowAppIcon(target: .weChat, size: 32)
+                Text("微信最近会话").font(.title2.weight(.semibold))
+                Spacer()
+                Button("刷新") { controller.refreshSessions() }.disabled(controller.refreshing)
+            }
+            Text("从此 Mac 微信当前聊天列表读取最多 50 个会话，按最后联系时间排序；排除隐藏会话。仅使用本机只读元数据，不读取正文、草稿或改变已读状态。")
+                .font(.callout).foregroundStyle(.secondary)
+            List(controller.weChatRecentSessions) { session in
+                HStack {
+                    Circle().fill(Color(wheelHex: controller.colorHex(session.id))).frame(width: 7, height: 7)
+                    Text(session.title)
+                }.padding(.vertical, 4)
+            }
+            Text(controller.listStatus).font(.caption).foregroundStyle(.secondary)
+            Label("自动打开指定聊天及输入框聚焦尚待验证。", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("\(controller.weChatRecentSessions.count) / 50 个会话").font(.caption)
+                Spacer()
+                Button("打开选择器") { controller.enter(target: .weChat) }.disabled(!controller.ready)
+            }
+        }.padding(22).frame(width: 560, height: 500)
+        .onAppear { if !controller.refreshing && controller.navigation.stage != .choosing { controller.refreshSessions() } }
+    }
 }

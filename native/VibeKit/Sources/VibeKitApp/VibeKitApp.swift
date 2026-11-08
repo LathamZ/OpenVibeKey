@@ -17,6 +17,9 @@ struct VibeKitApp: App {
     @ObservedObject private var language = AppLanguage.shared
 
     init() {
+        if let i = CommandLine.arguments.firstIndex(of: "--wechat-recent-check"), i + 1 < CommandLine.arguments.count {
+            runWeChatRecentCheck(path: CommandLine.arguments[i + 1], live: CommandLine.arguments.contains("--verify-local-source"))
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--menu-surface-preview"), i + 1 < CommandLine.arguments.count {
             beginMenuSurfacePreview(path: CommandLine.arguments[i + 1])
             return
