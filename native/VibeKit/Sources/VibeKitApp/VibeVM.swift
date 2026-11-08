@@ -282,12 +282,24 @@ final class VibeVM: ObservableObject {
         }
         holdToTalk.eligible = { [weak self] in
             guard let self else { return false }
-            return self.connected && self.slotsHydrated && !self.applyingProfile && !self.quitting &&
-                !self.codexWorkflow.busy && !self.codexWorkflow.hasRecovery && self.voiceKeyRouteReady &&
-                self.codexWorkflow.navigation.stage != .choosing && self.codexWorkflow.navigation.stage != .opening
+            return VoiceInputReadiness.available(connected: self.connected, hydrated: self.slotsHydrated,
+                changing: self.applyingProfile || self.codexWorkflow.busy, quitting: self.quitting,
+                voiceKeyVerified: self.voiceKeyRouteReady,
+                selectorActive: self.codexWorkflow.navigation.stage == .choosing || self.codexWorkflow.navigation.stage == .opening)
+        }
+        holdToTalk.blockedReason = { [weak self] in
+            guard let self else { return "等待设备。" }
+            if !self.connected { return "设备未连接，保持静音。" }
+            if !self.slotsHydrated || self.applyingProfile || self.codexWorkflow.busy { return "正在核对设备配置，保持静音。" }
+            if self.quitting { return "正在退出，保持静音。" }
+            if !self.voiceKeyRouteReady { return "按钮 1 原键位尚未通过核对，保持静音。" }
+            return "会话选择期间按钮 1 用于翻页，保持静音。"
         }
         holdToTalk.onStatus = { [weak self] text, ready, open in
             guard let self else { return }
+            self.defaults.set(self.voiceKeyRouteReady, forKey: "voiceHold.route.keyVerified")
+            self.defaults.set(self.codexWorkflow.hasRecovery, forKey: "voiceHold.navigation.recovery")
+            self.defaults.set(self.codexWorkflow.ready, forKey: "voiceHold.navigation.ready")
             if self.voiceHoldStatus != text { self.voiceHoldStatus = text }
             if self.voiceHoldReady != ready { self.voiceHoldReady = ready }
             if self.voiceHoldOpen != open { self.voiceHoldOpen = open }
@@ -1938,6 +1950,8 @@ extension VibeVM {
             physicalRotaryMonitor.stop()
             codexWorkflow.ready = false; codexWorkflow.hasRecovery = true
             codexWorkflow.message = "旋钮导航捕获未能恢复，请关闭导航并恢复原键位后重试。"
+            voiceKeyRouteReady = false; holdToTalk.cancel()
+            restoreVoiceAfterNavigationFailure()
             return false
         }
     }
@@ -2174,10 +2188,12 @@ extension VibeVM {
     private func finishNavigationRestore() {
         cancelNativePageRouting()
         navigationJournal = nil; navigationRecoveryCorrupt = false
+        voiceKeyRouteReady = true
         defaults.removeObject(forKey: navigationRecoveryKey); defaults.synchronize()
         unregisterNavigationKeys(); navigationOwnsHardware = false
         codexWorkflow.stop(); codexWorkflow.hasRecovery = false; codexWorkflow.busy = false
         resetNavigationGestures()
+        holdToTalk.refreshEligibility()
         // Legacy capture is reinstated only after its original action has been restored.
         persistDialRestore(nil); dialCaptureCombo = nil; HotKeyCenter.shared.unregister("dialGesture")
     }
@@ -2247,7 +2263,8 @@ extension VibeVM {
 extension VibeVM {
     private func cancelNativePageRouting() {
         nativePageRoute.reset(); codexWorkflow.pageRoutingBusy = false
-        voiceKeyRouteReady = true; holdToTalk.refreshEligibility()
+        voiceKeyRouteReady = navigationJournal == nil && !navigationRecoveryCorrupt
+        holdToTalk.refreshEligibility()
         codexWorkflow.nativePageStatus = "选择层保持旋钮导航键位。"
     }
     private func syncNativePageRoute(_ wantedContent: Bool) {
@@ -2277,6 +2294,7 @@ extension VibeVM {
                 self.codexWorkflow.nativePageStatus = "旋钮键位核对失败，恢复记录已保留。请关闭导航并恢复原键位。"
                 self.codexWorkflow.message = self.codexWorkflow.nativePageStatus
                 self.codexWorkflow.refreshPhysicalFocusRoute()
+                self.restoreVoiceAfterNavigationFailure()
                 return
             }
             if let next { self.startNativePageRouting(next); return }
@@ -2287,6 +2305,24 @@ extension VibeVM {
                 : operation.mode == .selection ? "列表键位已就绪：转动选择；底部键按下并松开关闭列表。"
                 : operation.mode == .arrows ? "左右移动已就绪：左转 ←，右转 →；底部键为退格。" : "旋钮导航键位已恢复。"
             self.codexWorkflow.refreshPhysicalFocusRoute()
+        }
+    }
+    /// A failed rotary route must not permanently disable an independently verified
+    /// physical voice key. Keep the full navigation recovery journal unchanged.
+    private func restoreVoiceAfterNavigationFailure() {
+        guard connected, !quitting, let device = dev, let journal = navigationJournal, journal.isValid,
+              let slot = journal.slots.first(where: { $0.id == "btn1" && $0.selectorPaging == true }) else { return }
+        let generation = navigationOperation
+        io.async {
+            let verified = device.getSN() == journal.deviceSerial && Self.restoreNavigationSlot(slot, device: device)
+            DispatchQueue.main.async {
+                guard self.navigationOperation == generation, self.connected, !self.quitting,
+                      !self.codexWorkflow.ready, self.codexWorkflow.hasRecovery else { return }
+                self.voiceKeyRouteReady = verified
+                self.defaults.set(verified, forKey: "voiceHold.route.recoveredOriginal")
+                if verified { self.defaults.set(ProcessInfo.processInfo.systemUptime, forKey: "voiceHold.route.keyReadyUptime") }
+                self.holdToTalk.refreshEligibility()
+            }
         }
     }
     private func writeNativePageMode(_ mode: NativePageScroll.Mode, completion: @escaping (Bool) -> Void) {

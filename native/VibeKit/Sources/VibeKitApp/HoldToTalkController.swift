@@ -17,6 +17,7 @@ final class HoldToTalkController {
     private var lastPublished: String?
     var configuration: () -> [String]? = { nil }
     var eligible: () -> Bool = { false }
+    var blockedReason: () -> String = { "等待按钮 1 就绪。" }
     var onStatus: (String, Bool, Bool) -> Void = { _, _, _ in }
     init() {
         input.onInputChanged = { [weak self] in self?.monitor.cancel() }
@@ -35,8 +36,11 @@ final class HoldToTalkController {
         }
     }
     private func publish() {
-        let ready = inputReady && monitor.ready
-        let text = !inputReady || monitor.ready ? inputStatus : inputStatus + "；" + monitorStatus
+        let baseReady = inputReady && monitor.ready
+        let allowed = eligible()
+        let ready = baseReady && allowed
+        let text = baseReady && !allowed ? blockedReason() :
+            (!inputReady || monitor.ready ? inputStatus : inputStatus + "；" + monitorStatus)
         let snapshot = "\(ready)|\(isOpen)|" + text
         guard snapshot != lastPublished else { return }
         lastPublished = snapshot
@@ -66,9 +70,10 @@ final class HoldToTalkController {
         if !eligible() { cancel() }
         if let tokens = configuration() { monitor.start(tokens: tokens) }
         else { monitor.stop(); monitorStatus = "等待 VibeKey 按钮配置。"; publish() }
+        publish()
     }
     /// Existing monitor stays attached; no 200ms poll is needed after a verified key restoration.
-    func refreshEligibility() { if !eligible() { cancel() } }
+    func refreshEligibility() { if !eligible() { cancel() }; publish() }
     func cancel() { monitor.cancel(); input.setOpen(false) }
     func shutdown() {
         timer?.invalidate(); timer = nil; monitor.stop(); input.end(restoreOriginal: false)

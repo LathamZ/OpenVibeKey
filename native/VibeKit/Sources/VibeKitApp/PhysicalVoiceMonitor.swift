@@ -76,7 +76,19 @@ final class PhysicalVoiceMonitor {
         let allDown = required.isSubset(of: down)
         // Keep the initial/context barrier until every modifier/main key is released.
         if !allDown, !down.isEmpty { cancel(); return }
-        if let open = press.edge(down: allDown, eligible: eligible()) { onOpen(open) }
+        let allowed = eligible()
+        let defaults = UserDefaults.standard
+        if allDown || down.isEmpty {
+            let wasDown = defaults.bool(forKey: "voiceHold.signal.down")
+            if wasDown != allDown {
+                let key = allDown ? "voiceHold.signal.presses" : "voiceHold.signal.releases"
+                defaults.set(defaults.integer(forKey: key) + 1, forKey: key)
+                defaults.set(allDown, forKey: "voiceHold.signal.down")
+                defaults.set(allowed, forKey: "voiceHold.signal.lastEligible")
+                defaults.set(ProcessInfo.processInfo.systemUptime, forKey: "voiceHold.signal.lastUptime")
+            }
+        }
+        if let open = press.edge(down: allDown, eligible: allowed) { onOpen(open) }
     }
     func stop() {
         cancel(); ready = false

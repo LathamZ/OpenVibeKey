@@ -790,5 +790,27 @@ do {
     check("fresh press after verification opens immediately", held.edge(down: true, eligible: true) == true)
 }
 
+do {
+    for bits in 0..<64 {
+        let connected = bits & 1 != 0, hydrated = bits & 2 != 0
+        let changing = bits & 4 != 0, quitting = bits & 8 != 0
+        let verified = bits & 16 != 0, selecting = bits & 32 != 0
+        let allowed = VoiceInputReadiness.available(connected: connected, hydrated: hydrated,
+            changing: changing, quitting: quitting, voiceKeyVerified: verified, selectorActive: selecting)
+        check("voice readiness matrix \(bits)", allowed == (bits == 19))
+    }
+    var voice = VoiceHoldPress()
+    let restoredVoice = VoiceInputReadiness.available(connected: true, hydrated: true,
+        changing: false, quitting: false, voiceKeyVerified: true, selectorActive: false)
+    check("verified original voice remains usable independently of navigation recovery",
+          voice.edge(down: true, eligible: restoredVoice) == true)
+    check("release closes after independent recovery", voice.edge(down: false, eligible: true) == false)
+    let unverified = VoiceInputReadiness.available(connected: true, hydrated: true,
+        changing: false, quitting: false, voiceKeyVerified: false, selectorActive: false)
+    check("failed original readback keeps voice closed", voice.edge(down: true, eligible: unverified) == nil && !voice.isOpen)
+    check("verification never replays an already held voice key", voice.edge(down: true, eligible: restoredVoice) == nil)
+    _ = voice.edge(down: false, eligible: restoredVoice)
+    check("fresh press after readback immediately opens", voice.edge(down: true, eligible: restoredVoice) == true)
+}
 print("Navigation checks: \(checks), failures: \(failures). No hardware IO or target-app control performed.")
 exit(failures == 0 ? 0 : 1)

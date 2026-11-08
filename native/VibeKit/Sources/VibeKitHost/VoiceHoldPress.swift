@@ -1,6 +1,16 @@
 import Foundation
 import VibeKitCore
 
+/// Navigation recovery is independent from a verified original voice key.
+/// Never infer voice readiness from the remaining rotary/backspace route.
+public enum VoiceInputReadiness {
+    public static func available(connected: Bool, hydrated: Bool, changing: Bool,
+                                 quitting: Bool, voiceKeyVerified: Bool,
+                                 selectorActive: Bool) -> Bool {
+        connected && hydrated && !changing && !quitting && voiceKeyVerified && !selectorActive
+    }
+}
+
 /// Physical keyboard signal used by button 1. No synthetic events or shortcut rewriting.
 public enum VoiceKeySignal {
     public static func usages(_ tokens: [String]) -> Set<UInt32>? {

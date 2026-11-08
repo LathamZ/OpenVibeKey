@@ -2,7 +2,9 @@
 
 A personal fork of [OpenVibeKey](https://github.com/palaemonboy/OpenVibeKey), licensed under MIT. Original copyright and license are retained. The new name and orbit/V icon identify this fork; they are not upstream branding.
 
-## 1.0.0-preview.5 (build 64)
+## 1.0.0-preview.5 (build 65)
+
+- Voice readiness now reflects current context and verified button-1 routing, rather than only an attached HID monitor and available audio mute control. Navigation recovery cannot permanently block a separately restored and read-back original voice shortcut. After a route failure, only that voice slot is restored independently; full navigation recovery records remain intact. Failed readback, held keys and selector context still keep input closed. Aggregate physical press/release counters aid local diagnosis without recording audio or general keyboard events.
 
 - Confirmed desktop opens now use LaunchServices for already-running, hidden/minimized and cold-start cases, then rebuild AX session handles and verify selection. AX listing/selection/focus runs off the main UI/HID thread; composer matching follows explicit placeholder/description hints with a deeper bounded traversal, not the first text area. No fixed350ms focus delay remains. A transient return to the source App when the overlay hides does not cancel the confirmed launch; after destination activation, switching elsewhere cancels pending work.
 - Restoring the voice key is prioritized ahead of rotary/Backspace routing. Once its original shortcut and function bank verify, hold-to-talk no longer waits for the other routing writes. Desktop destinations are activated only after that voice-key milestone, so the App is not presented while its voice shortcut is still a selector paging key. Known unchanged keys are not rewritten. Failed restoration and held/context barriers still fail closed; it does not replay a press started before readiness. Physical end-to-end speech latency remains a user trial.
