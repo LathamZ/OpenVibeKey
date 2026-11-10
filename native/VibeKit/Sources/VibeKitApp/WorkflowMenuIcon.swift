@@ -23,9 +23,16 @@ final class MenuImageDrawAudit: @unchecked Sendable {
         guard CommandLine.arguments.contains("--menu-surface-preview") else { return }
         lock.lock(); defer { lock.unlock() }
         values.append(["appearance": appearance.name.rawValue, "target": target.rawValue,
-                       "connected": connected, "complete_composite": true])
+                       "connected": connected, "complete_composite": true,
+                       "pointer_filled": WorkflowMenuIcon.fillsPointer(target: target, appearance: appearance)])
     }
     func snapshot() -> [[String: Any]] { lock.lock(); defer { lock.unlock() }; return values }
+}
+
+func menuSurfacePreviewTarget() -> WorkflowTargetID {
+    if let i = CommandLine.arguments.firstIndex(of: "--menu-preview-target"), i + 1 < CommandLine.arguments.count,
+       let target = WorkflowTargetID(rawValue: CommandLine.arguments[i + 1]) { return target }
+    return .deepSeek
 }
 
 /// Isolated real MenuBarExtra run; audit the actual complete image drawing handler.
@@ -38,7 +45,9 @@ func beginMenuSurfacePreview(path: String) {
         let dark = surfaces.contains { $0.contains("Dark") }
         let result: [String: Any] = ["passed": light && dark, "surfaces": surfaces, "draws": draws,
             "both_surface_variants_drawn": light && dark,
-            "foreground_strategy": "one adaptive image with body, pointer and dots; current drawing appearance",
+            "foreground_strategy": "one adaptive image; Codex native hollow pointer on every surface",
+            "target": menuSurfacePreviewTarget().rawValue,
+            "codex_pointer_never_filled": !draws.isEmpty && draws.filter { $0["target"] as? String == "codex" }.allSatisfy { $0["pointer_filled"] as? Bool == false },
             "app_appearance": NSApp.effectiveAppearance.name.rawValue,
             "system_setting_changed": false, "hardware_started": false,
             "final_visible_variant_verified": false]
@@ -235,10 +244,10 @@ enum WorkflowMenuIcon {
     static func make(target: WorkflowTargetID, connected: Bool, darkAppearance: Bool = false) -> NSImage {
         make(target: target, connected: connected, appearance: NSAppearance(named: darkAppearance ? .darkAqua : .aqua)!)
     }
-    /// Codex's white tint disappears into a light menu surface; preserve the
-    /// native transparent notch there rather than filling it with another color.
+    /// Codex keeps the native hollow pointer in every actual drawing appearance.
+    /// A white body is not evidence of a light menu surface; never fill its gap.
     static func fillsPointer(target: WorkflowTargetID, appearance: NSAppearance) -> Bool {
-        target != .codex || appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        target != .codex
     }
     static func make(target: WorkflowTargetID, connected: Bool, appearance: NSAppearance) -> NSImage {
         let foreground = bodyColor(appearance: appearance)
@@ -284,7 +293,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         // Existing body/dot and full-image checks cover that variant.
         if connected {
             check(!notch.isEmpty)
-            if target == .codex && !darkAppearance {
+            if target == .codex {
                 check(notch.allSatisfy { pixels[$0*4+3] == bodyPixels[$0*4+3] })
             } else {
                 check(notch.allSatisfy { pixels[$0*4+3] > 220 })
@@ -317,7 +326,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
         check(cached === icon); check(opposite !== icon)
         results.append(["target": target.rawValue, "connected": connected, "darkAppearance": darkAppearance, "hex": WorkflowMenuIcon.menuHex(target),
                         "originalDialBodyPreserved": alphaMatches, "bodyForegroundAndPointerValid": bodyMatches, "outerComponents": WorkflowMenuIcon.points(connected: connected).count, "pointScale": WorkflowMenuIcon.pointScale(target),
-                        "pointerFillMode": target == .codex && !darkAppearance ? "native-transparent-gap" : "app-color",
+                        "pointerFillMode": target == .codex ? "native-transparent-gap" : "app-color",
                         "notchSamples": notch.count])
         if connected {
             let url = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("menu-\(target.rawValue)-\(darkAppearance ? "dark" : "light").png")
@@ -397,8 +406,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
     for name in [NSAppearance.Name.aqua, .vibrantLight, .accessibilityHighContrastAqua,
                  .darkAqua, .vibrantDark, .accessibilityHighContrastDarkAqua] {
         guard let appearance = NSAppearance(named: name) else { check(false); continue }
-        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        check(WorkflowMenuIcon.fillsPointer(target: .codex, appearance: appearance) == dark)
+        check(!WorkflowMenuIcon.fillsPointer(target: .codex, appearance: appearance))
         for target in WorkflowAppCycle.order where target != .codex {
             check(WorkflowMenuIcon.fillsPointer(target: target, appearance: appearance))
         }
@@ -406,7 +414,7 @@ func runWorkflowMenuIconCheck(path: String) -> Int32 {
     application.appearance = savedAppearance
     let report: [String: Any] = ["checks": checks, "failures": failures, "targets": results,
                                "native_surface_appearance_checks": surfaceResults,
-                               "foreground_source": "complete adaptive image resolves current drawing appearance; Codex light-surface native transparent gap; app-colored pointer otherwise; perimeter dots unchanged, no glow",
+                               "foreground_source": "complete adaptive image resolves current drawing appearance; Codex native transparent gap in every drawing appearance; app-colored pointer for other targets; perimeter dots unchanged, no glow",
                                "system_setting_changed": false, "hardware_or_target_UI_access": false]
     do { try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path)) }
     catch { return 1 }

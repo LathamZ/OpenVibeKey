@@ -161,7 +161,7 @@ struct VibeKitApp: App {
             }
         } label: {
             if CommandLine.arguments.contains("--menu-surface-preview") {
-                NativeWorkflowMenuIcon(target: .deepSeek, connected: true).frame(width: 18, height: 18)
+                NativeWorkflowMenuIcon(target: menuSurfacePreviewTarget(), connected: true).frame(width: 18, height: 18)
             } else {
                 PermissionMenuIcon(connected: vm.connected, controller: vm.codexWorkflow)
             }
